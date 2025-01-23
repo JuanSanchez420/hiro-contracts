@@ -1,11 +1,12 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.0;
+pragma solidity =0.7.6;
+pragma abicoder v2;
 
 import "./HiroWallet.sol";
 import "./interfaces/IHiroFactory.sol";
 import "openzeppelin-contracts/contracts/access/Ownable.sol";
 
-contract HiroFactory is Ownable(msg.sender), IHiroFactory {
+contract HiroFactory is Ownable, IHiroFactory {
 
     event HiroCreated(address indexed owner, address indexed wallet);
     event PriceSet(uint256 price);

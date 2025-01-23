@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: UNLICENSED
-pragma solidity ^0.8.4;
+pragma solidity =0.7.6;
 
-interface Interface {
+interface ICLFactory {
     event DefaultUnstakedFeeChanged(uint24 indexed oldUnstakedFee, uint24 indexed newUnstakedFee);
     event OwnerChanged(address indexed oldOwner, address indexed newOwner);
     event PoolCreated(address indexed token0, address indexed token1, int24 indexed tickSpacing, address pool);

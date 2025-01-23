@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: UNLICENSED
-pragma solidity ^0.8.0;
+pragma solidity =0.7.6;
+pragma abicoder v2;
 
 import {Test, console} from "forge-std/Test.sol";
 
@@ -15,6 +16,6 @@ contract HiroTest is Test {
     function test_Hiro_details() public view {
         assertEq(hiro.symbol(), "HIRO");
         assertEq(hiro.name(), "Hiro Token");
-        assertEq(hiro.decimals(), 18);
+        assertEq(uint256(hiro.decimals()), uint256(18));
     }
 }
