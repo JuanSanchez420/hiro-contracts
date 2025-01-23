@@ -5,12 +5,7 @@ pragma abicoder v2;
 import {Script, console} from "lib/forge-std/src/Script.sol";
 import {Hiro} from "../src/Hiro.sol";
 import {HiroFactory} from "../src/HiroFactory.sol";
-import "lib/v3-periphery/contracts/interfaces/INonfungiblePositionManager.sol";
 import "abi/ICLFactory.sol";
-import "lib/openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
-import "lib/v3-core/contracts/libraries/TickMath.sol";
-import "lib/v3-core/contracts/interfaces/pool/IUniswapV3PoolState.sol";
-import "lib/v3-core/contracts/interfaces/pool/IUniswapV3PoolImmutables.sol";
 
 contract Deploy is Script {
     Hiro public hiro;
