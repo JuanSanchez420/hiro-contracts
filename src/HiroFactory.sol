@@ -2,9 +2,8 @@
 pragma solidity ^0.8.0;
 
 import "./HiroWallet.sol";
-import "@openzeppelin/contracts/access/Ownable.sol";
-import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "./interfaces/IHiroFactory.sol";
+import "openzeppelin-contracts/contracts/access/Ownable.sol";
 
 contract HiroFactory is Ownable(msg.sender), IHiroFactory {
 

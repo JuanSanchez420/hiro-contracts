@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.0;
 
-import "@uniswap/v3-periphery/contracts/interfaces/INonfungiblePositionManager.sol";
 import {Script, console} from "forge-std/Script.sol";
 import {Hiro} from "../src/Hiro.sol";
 import {HiroFactory} from "../src/HiroFactory.sol";
+import "v3-periphery/contracts/interfaces/INonfungiblePositionManager.sol";
 
 contract Deploy is Script {
     address public hiro;
@@ -20,7 +20,10 @@ contract Deploy is Script {
     function run() public {
         string memory json = vm.readFile("../data/whitelist.json");
 
-        address[] memory initialWhitelist = abi.decode(vm.parseJson(json), (address[]));
+        address[] memory initialWhitelist = abi.decode(
+            vm.parseJson(json),
+            (address[])
+        );
 
         vm.startBroadcast();
 
@@ -33,17 +36,20 @@ contract Deploy is Script {
             initialWhitelist
         );
 
-        ICLFactory factory = ICLFactory(
-            vm.envAddress("AERO_FACTORY")
-        );
+        ICLFactory factory = ICLFactory(vm.envAddress("AERO_FACTORY"));
 
         INonfungiblePositionManager positionManager = INonfungiblePositionManager(
                 vm.envAddress("AERO_NONFUNGIBLEPOSITIONMANAGER")
             );
 
-        address pool = factory.createPool(token0, token1, fee, vm.envString("STARTING_PRICE"));
+        address pool = factory.createPool(
+            token0,
+            token1,
+            fee,
+            vm.envString("STARTING_PRICE")
+        );
         console.log("Pool created at:", pool);
-        
+
         seedPool(positionManager);
 
         vm.stopBroadcast();
@@ -55,7 +61,7 @@ contract Deploy is Script {
         (address token0, address token1) = weth < hiro
             ? (weth, hiro)
             : (hiro, weth);
-        (uint256 amount0, uint256 amount1) = weth < hiro
+        (uint256 amount0Desired, uint256 amount1Desired) = weth < hiro
             ? (tokenAmount, 0)
             : (0, tokenAmount);
 
@@ -68,8 +74,8 @@ contract Deploy is Script {
                 fee: fee,
                 tickLower: MIN_TICK,
                 tickUpper: MAX_TICK,
-                amount0Desired: amount0,
-                amount1Desired: amount1,
+                amount0Desired: amount0Desired,
+                amount1Desired: amount1Desired,
                 amount0Min: 0,
                 amount1Min: 0,
                 recipient: msg.sender,
