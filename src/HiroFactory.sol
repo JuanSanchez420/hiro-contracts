@@ -4,7 +4,7 @@ pragma abicoder v2;
 
 import "./HiroWallet.sol";
 import "./interfaces/IHiroFactory.sol";
-import "openzeppelin-contracts/contracts/access/Ownable.sol";
+import "lib/openzeppelin-contracts/contracts/access/Ownable.sol";
 
 contract HiroFactory is Ownable, IHiroFactory {
 
