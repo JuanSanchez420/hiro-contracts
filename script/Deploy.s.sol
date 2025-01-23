@@ -42,46 +42,10 @@ contract Deploy is Script {
             initialWhitelist
         );
 
-        ICLFactory factory = ICLFactory(vm.envAddress("AERO_FACTORY"));
-
         INonfungiblePositionManager positionManager = INonfungiblePositionManager(
                 vm.envAddress("AERO_NONFUNGIBLEPOSITIONMANAGER")
             );
-/*
-        address pool = factory.createPool(
-            address(hiro),
-            weth,
-            tickSpacing,
-            TickMath.getSqrtRatioAtTick(int24(vm.envInt("STARTING_TICK")))
-        );
-        console.log("Pool created at:", pool);
-        
-        */
 
-/*
-        (
-            uint160 sqrtPriceX96,
-            int24 tick,
-            ,
-            ,
-            ,
-            uint8 feeProtocol,
-            bool unlocked
-        ) = IUniswapV3PoolState(pool).slot0();
-
-        console.log("sqrtPriceX96", uint256(sqrtPriceX96));
-        console.log("tick:", int256(tick));
-        console.log("fee:", uint256(feeProtocol));
-        console.log("unlocked:", unlocked);
-
-*/
-/*
-        uint256 l = IUniswapV3PoolState(pool).liquidity();
-        console.log("liquidity:", l);
-
-        int24 t = IUniswapV3PoolImmutables(pool).tickSpacing();
-        console.log("tickSpacing:", int256(t));
-*/
         seedPool(positionManager);
 
         vm.stopBroadcast();
@@ -104,8 +68,9 @@ contract Deploy is Script {
         IERC20(tokenToApprove).approve(address(positionManager), tokenAmount);
 
         int24 startingTick = int24(vm.envInt("STARTING_TICK"));
-        int24 tickUpper = nearestUsableTick(wethIsToken0 ? MAX_TICK : startingTick);
-        int24 tickLower = nearestUsableTick(wethIsToken0 ? startingTick : MIN_TICK);
+
+        int24 tickUpper = nearestUsableTick(wethIsToken0 ? startingTick : MAX_TICK);
+        int24 tickLower = nearestUsableTick(wethIsToken0 ? MIN_TICK : startingTick);
 
         INonfungiblePositionManager.MintParams
             memory params = INonfungiblePositionManager.MintParams({
@@ -120,7 +85,7 @@ contract Deploy is Script {
                 amount1Min: 0,
                 recipient: msg.sender,
                 deadline: block.timestamp + 120, // 2-minute deadline
-                sqrtPriceX96: TickMath.getSqrtRatioAtTick(int24(vm.envInt("STARTING_TICK")))
+                sqrtPriceX96: TickMath.getSqrtRatioAtTick(startingTick)
             });
 
         (
@@ -137,7 +102,28 @@ contract Deploy is Script {
         console.log("  Amount1 used:", amount1);
     }
 
-    function nearestUsableTick(int24 tick) internal view returns (int24) {
+    function nearestUsableTick(int24 tick) internal pure returns (int24) {
         return (tick / tickSpacing) * tickSpacing;
+    }
+
+    function sqrt(uint256 y) internal pure returns (uint256 z) {
+        if (y > 3) {
+            z = y;
+            uint256 x = y / 2 + 1;
+            while (x < z) {
+                z = x;
+                x = (y / x + x) / 2;
+            }
+        } else if (y != 0) {
+            z = 1;
+        }
+    }
+
+    function encodePriceSqrt(uint256 reserve1, uint256 reserve0) public pure returns (uint160) {
+        reserve1 = reserve1 * 2 ** 192;
+        uint256 division = reserve1 / reserve0;
+        uint256 sqrtX96 = sqrt(division);
+
+        return uint160(sqrtX96);
     }
 }
