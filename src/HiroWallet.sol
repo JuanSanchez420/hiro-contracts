@@ -42,8 +42,8 @@ contract HiroWallet {
     }
 
     // Owner functions
-    function deposit(uint256 amount) external payable onlyOwner {
-        IERC20(tokenAddress).transferFrom(msg.sender, address(this), amount);
+    function deposit(address token, uint256 amount) external onlyOwner {
+        IERC20(token).transferFrom(msg.sender, address(this), amount);
     }
 
     receive() external payable onlyOwner {}
