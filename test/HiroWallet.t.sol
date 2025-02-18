@@ -11,7 +11,6 @@ contract HiroWalletTest is Test {
     function setUp() public {
         hiroWallet = new HiroWallet(
             address(this),
-            address(this),
             address(this)
         );
 
@@ -20,6 +19,5 @@ contract HiroWalletTest is Test {
     function test_HiroWallet_details() public view {
         assertEq(hiroWallet.owner(), address(this));
         assertEq(hiroWallet.tokenAddress(), address(this));
-        assertEq(hiroWallet.agentAddress(), address(this));
     }
 }

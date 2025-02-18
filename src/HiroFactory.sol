@@ -15,30 +15,34 @@ contract HiroFactory is Ownable, IHiroFactory {
 
     mapping(address => address) public override ownerToWallet;
     address public immutable tokenAddress;
-    address public immutable agentAddress;
     mapping(address=>bool) private whitelist;
+    mapping(address=>bool) private agents;
 
     uint256 public override price;
 
-    constructor(address _tokenAddress, address _agentAddress, uint256 _price, address[] memory _whitelist) {
+    constructor(address _tokenAddress, uint256 _price, address[] memory _whitelist, address[] memory _agents) {
         tokenAddress = _tokenAddress;
-        agentAddress = _agentAddress;
         price = _price;
 
         for(uint i = 0; i < _whitelist.length; i++) {
             whitelist[_whitelist[i]] = true;
         }
+
+        for(uint i = 0; i < _agents.length; i++) {
+            agents[_agents[i]] = true;
+        }
     }
 
-    function createHiroWallet(uint256 tokenAmount) external override payable {
+    function createHiroWallet() external override payable returns (address payable) {
         require(ownerToWallet[msg.sender] == address(0), "Subcontract already exists");
-        require(tokenAmount >= price, "Token amount must be greater than price");
 
-        IERC20(tokenAddress).transferFrom(msg.sender, address(this), tokenAmount);
+        IERC20(tokenAddress).transferFrom(msg.sender, address(this), price);
 
-        HiroWallet wallet = new HiroWallet{value: msg.value}(msg.sender, tokenAddress, agentAddress);
+        HiroWallet wallet = new HiroWallet{value: msg.value}(msg.sender, tokenAddress);
 
         ownerToWallet[msg.sender] = address(wallet);
+
+        return payable(wallet);
     }
 
     function sweep(address token, uint256 amount) external override onlyOwner() {
@@ -75,5 +79,13 @@ contract HiroFactory is Ownable, IHiroFactory {
 
     function getWallet(address owner) external override view returns (address) {
         return ownerToWallet[owner];
+    }
+
+    function isAgent(address addr) external override view returns (bool) {
+        return agents[addr];
+    }
+
+    function setAgent(address addr, bool b) external override onlyOwner {
+        agents[addr] = b;
     }
 }

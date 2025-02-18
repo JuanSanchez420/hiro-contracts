@@ -30,6 +30,28 @@ contract Deploy is Script {
             (address[])
         );
 
+        // Build dynamic agents array by looking for AGENT_ADDRESS_1, AGENT_ADDRESS_2, etc.
+        uint256 maxAgents = 5; // adjust as needed
+        address[] memory agentsTemp = new address[](maxAgents);
+        uint256 count = 0;
+        for (uint256 i = 1; i <= maxAgents; i++) {
+            string memory key = string(
+                abi.encodePacked("AGENT_ADDRESS_", vm.toString(i))
+            );
+            // If the environment variable isn’t set, vm.envString returns an empty string.
+            string memory agentStr = vm.envString(key);
+            if (bytes(agentStr).length == 0) {
+                break;
+            }
+            agentsTemp[count] = vm.envAddress(key);
+            count++;
+        }
+        // Copy found addresses into a dynamic array of exact length.
+        address[] memory agents = new address[](count);
+        for (uint256 i = 0; i < count; i++) {
+            agents[i] = agentsTemp[i];
+        }
+
         vm.startBroadcast();
 
         hiro = new Hiro();
@@ -37,10 +59,11 @@ contract Deploy is Script {
 
         hiroFactory = new HiroFactory(
             address(hiro),
-            vm.envAddress("AGENT_ADDRESS"),
             100 ether,
-            initialWhitelist
+            initialWhitelist,
+            agents
         );
+        console.log("Hiro Factory deployed at:", address(hiroFactory));
 
         INonfungiblePositionManager positionManager = INonfungiblePositionManager(
                 vm.envAddress("AERO_NONFUNGIBLEPOSITIONMANAGER")
@@ -69,8 +92,12 @@ contract Deploy is Script {
 
         int24 startingTick = int24(vm.envInt("STARTING_TICK"));
 
-        int24 tickUpper = nearestUsableTick(wethIsToken0 ? startingTick : MAX_TICK);
-        int24 tickLower = nearestUsableTick(wethIsToken0 ? MIN_TICK : startingTick);
+        int24 tickUpper = nearestUsableTick(
+            wethIsToken0 ? startingTick : MAX_TICK
+        );
+        int24 tickLower = nearestUsableTick(
+            wethIsToken0 ? MIN_TICK : startingTick
+        );
 
         INonfungiblePositionManager.MintParams
             memory params = INonfungiblePositionManager.MintParams({
@@ -104,26 +131,5 @@ contract Deploy is Script {
 
     function nearestUsableTick(int24 tick) internal pure returns (int24) {
         return (tick / tickSpacing) * tickSpacing;
-    }
-
-    function sqrt(uint256 y) internal pure returns (uint256 z) {
-        if (y > 3) {
-            z = y;
-            uint256 x = y / 2 + 1;
-            while (x < z) {
-                z = x;
-                x = (y / x + x) / 2;
-            }
-        } else if (y != 0) {
-            z = 1;
-        }
-    }
-
-    function encodePriceSqrt(uint256 reserve1, uint256 reserve0) public pure returns (uint160) {
-        reserve1 = reserve1 * 2 ** 192;
-        uint256 division = reserve1 / reserve0;
-        uint256 sqrtX96 = sqrt(division);
-
-        return uint160(sqrtX96);
     }
 }

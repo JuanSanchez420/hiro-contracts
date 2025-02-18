@@ -2,14 +2,15 @@
 pragma solidity =0.7.6;
 pragma abicoder v2;
 
-import "lib/openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
 import "./interfaces/IHiroFactory.sol";
+import "lib/openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
+import "lib/openzeppelin-contracts/contracts/access/AccessControl.sol";
+
 
 contract HiroWallet {
     address public owner;
     address public factory;
     address public immutable tokenAddress;
-    address public immutable agentAddress;
 
     modifier onlyOwner() {
         require(msg.sender == owner, "Not the owner");
@@ -17,7 +18,7 @@ contract HiroWallet {
     }
 
     modifier onlyAgent() {
-        require(msg.sender == agentAddress, "Not the agent");
+        require(IHiroFactory(factory).isAgent(msg.sender), "Not an agent");
         _;
     }
 
@@ -33,15 +34,11 @@ contract HiroWallet {
 
     constructor(
         address _owner,
-        address _tokenAddress,
-        address _agentAddress
+        address _tokenAddress
     ) payable {
         owner = _owner;
         tokenAddress = _tokenAddress;
-        agentAddress = _agentAddress;
         factory = msg.sender;
-
-
     }
 
     // Owner functions
