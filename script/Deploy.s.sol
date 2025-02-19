@@ -8,6 +8,7 @@ import {HiroFactory} from "../src/HiroFactory.sol";
 import "lib/slipstream/contracts/periphery/interfaces/INonfungiblePositionManager.sol";
 import "lib/openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
 import "lib/slipstream/contracts/core/libraries/TickMath.sol";
+import "lib/slipstream/contracts/core/interfaces/ICLFactory.sol";
 
 contract Deploy is Script {
     Hiro public hiro;
@@ -17,6 +18,8 @@ contract Deploy is Script {
     int24 public constant MIN_TICK = -MAX_TICK;
     uint24 public constant fee = 3000;
     int24 public constant tickSpacing = 200;
+
+    uint256 tokenAmount = 500_000_000 ether;
 
     address public weth = vm.envAddress("WETH");
 
@@ -55,11 +58,14 @@ contract Deploy is Script {
         vm.startBroadcast();
 
         hiro = new Hiro();
+        hiro.transfer(msg.sender, hiro.balanceOf(address(this)));
+        console.log("Hiro tokens transferred to deployer");
         console.log("Hiro deployed at:", address(hiro));
 
         hiroFactory = new HiroFactory(
             address(hiro),
             100 ether,
+            msg.sender,
             initialWhitelist,
             agents
         );
@@ -75,8 +81,6 @@ contract Deploy is Script {
     }
 
     function seedPool(INonfungiblePositionManager positionManager) internal {
-        uint256 tokenAmount = 500_000_000 ether;
-
         bool wethIsToken0 = weth < address(hiro);
 
         (address token0, address token1) = wethIsToken0
@@ -122,7 +126,13 @@ contract Deploy is Script {
             uint256 amount1
         ) = positionManager.mint(params);
 
-        console.log("Liquidity added:");
+        address pool = ICLFactory(positionManager.factory()).getPool(
+            token0,
+            token1,
+            tickSpacing
+        );
+
+        console.log("Liquidity added to:", pool);
         console.log("  Token ID:", tokenId);
         console.log("  Liquidity:", uint256(liquidity));
         console.log("  Amount0 used:", amount0);

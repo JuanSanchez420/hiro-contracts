@@ -62,6 +62,7 @@ contract HiroWalletTestExtended is Test {
         hiroFactory = new HiroFactory(
             address(hiro),
             TOKEN_AMOUNT,
+            msg.sender,
             initialWhitelist,
             agents
         );

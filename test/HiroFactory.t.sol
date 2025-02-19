@@ -42,6 +42,7 @@ contract TestHiroFactory is Test {
           hiroFactory = new HiroFactory(
                 address(hiro),
                 TOKEN_AMOUNT,
+                msg.sender,
                 initialWhitelist,
                 agents
           );
@@ -61,9 +62,11 @@ contract TestHiroFactory is Test {
      }
 
      function test_setPrice() public {
+          vm.startPrank(msg.sender);
           uint256 newPrice = 50 ether;
           hiroFactory.setPrice(newPrice);
           assertEq(hiroFactory.price(), newPrice);
+          vm.stopPrank();
      }
 
      function test_nonOwnerSetPrice() public {
@@ -75,6 +78,7 @@ contract TestHiroFactory is Test {
      }
 
      function test_addRemoveWhitelist() public {
+          vm.startPrank(msg.sender);
           address newAddr = address(0x1234);
           hiroFactory.addToWhitelist(newAddr);
           bool whitelisted = hiroFactory.isWhitelisted(newAddr);
@@ -83,14 +87,17 @@ contract TestHiroFactory is Test {
           hiroFactory.removeFromWhitelist(newAddr);
           whitelisted = hiroFactory.isWhitelisted(newAddr);
           assertFalse(whitelisted);
+          vm.stopPrank();
      }
 
      function test_setAgentAndNonOwnerSetAgent() public {
+          vm.startPrank(msg.sender);
           address agentAddr = address(0xABCD);
           // Set agent from owner
           hiroFactory.setAgent(agentAddr, true);
           bool isAgent = hiroFactory.isAgent(agentAddr);
           assertTrue(isAgent);
+          vm.stopPrank();
 
           // Attempt to change agent from non-owner
           address nonOwner = address(0xBEEF);
@@ -101,13 +108,15 @@ contract TestHiroFactory is Test {
      }
 
      function test_tokenSweep() public {
+          vm.startPrank(msg.sender);
           // After createHiroWallet, factory received TOKEN_AMOUNT tokens.
           uint256 factoryBalance = IERC20(hiro).balanceOf(address(hiroFactory));
           // Capture owner's token balance before sweep.
-          uint256 ownerBalanceBefore = IERC20(hiro).balanceOf(address(this));
+          uint256 ownerBalanceBefore = IERC20(hiro).balanceOf(msg.sender);
           hiroFactory.sweep(address(hiro), factoryBalance);
-          uint256 ownerBalanceAfter = IERC20(hiro).balanceOf(address(this));
+          uint256 ownerBalanceAfter = IERC20(hiro).balanceOf(msg.sender);
           assertEq(ownerBalanceAfter, ownerBalanceBefore + factoryBalance);
+          vm.stopPrank();
      }
 
      /* tested, works, but don't want public receive() on factory
