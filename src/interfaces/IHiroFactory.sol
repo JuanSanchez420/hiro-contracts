@@ -3,9 +3,10 @@ pragma solidity =0.7.6;
 
 abstract contract IHiroFactory {
     function ownerToWallet(address) virtual external view returns (address);
-    function price() virtual external view returns (uint256);
+    function transactionPrice() virtual external view returns (uint256);
+    function purchasePrice() virtual external view returns (uint256);
     function createHiroWallet() virtual external payable returns (address payable);
-    function setPrice(uint256 _price) virtual external;
+    function setTransactionPrice(uint256 _price) virtual external;
     function getWallet(address owner) virtual external view returns (address);
     function sweep(address token, uint256 amount) virtual external;
     function sweepETH() virtual external;

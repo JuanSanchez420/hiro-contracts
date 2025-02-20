@@ -5,29 +5,43 @@ pragma abicoder v2;
 import "./HiroWallet.sol";
 import "./interfaces/IHiroFactory.sol";
 import "lib/openzeppelin-contracts/contracts/access/Ownable.sol";
+import "lib/slipstream/contracts/core/interfaces/ICLFactory.sol";
+import "lib/slipstream/contracts/core/interfaces/ICLPool.sol";
+import "lib/slipstream/contracts/periphery/interfaces/ISwapRouter.sol";
 
 contract HiroFactory is Ownable, IHiroFactory {
+    event TransactionPriceSet(uint256 price);
     event HiroCreated(address indexed owner, address indexed wallet);
-    event PriceSet(uint256 price);
     event Whitelisted(address indexed addr);
     event RemovedFromWhitelist(address indexed addr);
 
     mapping(address => address) public override ownerToWallet;
-    address public immutable tokenAddress;
+    address public immutable hiro;
+    address public immutable pool;
+    address public immutable weth;
+    address public immutable swapRouter;
+
     mapping(address => bool) private whitelist;
     mapping(address => bool) private agents;
 
-    uint256 public override price;
+    uint256 public override transactionPrice; // basis points
+    uint256 public immutable override purchasePrice = 10_000_000_000_000_000; // 0.01 ETH
 
     constructor(
-        address _tokenAddress,
-        uint256 _price,
+        address _hiro,
+        address _pool,
+        address _weth,
+        address _swapRouter,
+        uint256 _transactionPrice,
         address factoryOwner,
         address[] memory _whitelist,
         address[] memory _agents
     ) {
-        tokenAddress = _tokenAddress;
-        price = _price;
+        hiro = _hiro;
+        pool = _pool;
+        weth = _weth;
+        swapRouter = _swapRouter;
+        transactionPrice = _transactionPrice;
         transferOwnership(factoryOwner);
 
         for (uint i = 0; i < _whitelist.length; i++) {
@@ -50,18 +64,45 @@ contract HiroFactory is Ownable, IHiroFactory {
             "Subcontract already exists"
         );
 
-        IERC20(tokenAddress).transferFrom(msg.sender, address(this), price);
+        require(msg.value >= purchasePrice, "Insufficient funds");
 
-        HiroWallet wallet = new HiroWallet{value: msg.value}(
-            msg.sender,
-            tokenAddress
-        );
+        uint256 remaining = msg.value - purchasePrice;
+
+        // do swap with purchase price
+        // TODO: maybe recipient
+        uint256 tokens = swapETHForHiro();
+
+        HiroWallet wallet = new HiroWallet{value: remaining}(msg.sender, hiro, pool, weth);
+        IERC20(hiro).transfer(msg.sender, tokens);
 
         ownerToWallet[msg.sender] = address(wallet);
 
         emit HiroCreated(msg.sender, address(wallet));
 
         return payable(wallet);
+    }
+
+    function swapETHForHiro() internal returns (uint256 amountOut) {
+        require(address(this).balance >= purchasePrice, "Not enough ETH");
+
+        // 2% slippage
+        // TODO: quoter
+        uint256 amountOutMinimum = (0 * 98) / 100;
+
+        // TODO: quoter
+        ISwapRouter.ExactInputSingleParams memory params = ISwapRouter
+            .ExactInputSingleParams({
+                tokenIn: weth,
+                tokenOut: hiro,
+                tickSpacing: ICLPool(pool).tickSpacing(),
+                recipient: address(this),
+                deadline: block.timestamp + 300,
+                amountIn: purchasePrice,
+                amountOutMinimum: 0,
+                sqrtPriceLimitX96: 0
+            });
+
+        amountOut = ISwapRouter(swapRouter).exactInputSingle{value: msg.value}(params);
     }
 
     function sweep(address token, uint256 amount) external override onlyOwner {
@@ -72,10 +113,10 @@ contract HiroFactory is Ownable, IHiroFactory {
         payable(msg.sender).transfer(address(this).balance);
     }
 
-    function setPrice(uint256 _price) external override onlyOwner {
-        price = _price;
+    function setTransactionPrice(uint256 _price) external override onlyOwner {
+        transactionPrice = _price;
 
-        emit PriceSet(_price);
+        emit TransactionPriceSet(_price);
     }
 
     function addToWhitelist(address addr) external override onlyOwner {

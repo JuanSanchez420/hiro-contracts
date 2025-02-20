@@ -14,14 +14,27 @@ contract Deploy is Script {
     Hiro public hiro;
     HiroFactory public hiroFactory;
 
+    struct PoolParams {
+        bool wethIsToken0;
+        address token0;
+        address token1;
+        uint256 amount0Desired;
+        uint256 amount1Desired;
+        address tokenToApprove;
+        int24 tickLower;
+        int24 tickUpper;
+    }
+
     int24 public constant MAX_TICK = 887220;
     int24 public constant MIN_TICK = -MAX_TICK;
     uint24 public constant fee = 3000;
     int24 public constant tickSpacing = 200;
+    int24 startingTick = int24(vm.envInt("STARTING_TICK"));
 
     uint256 tokenAmount = 500_000_000 ether;
 
     address public weth = vm.envAddress("WETH");
+    address public router = vm.envAddress("AERO_ROUTER");
 
     function setUp() public {}
 
@@ -62,8 +75,17 @@ contract Deploy is Script {
         console.log("Hiro tokens transferred to deployer");
         console.log("Hiro deployed at:", address(hiro));
 
+        INonfungiblePositionManager positionManager = INonfungiblePositionManager(
+                vm.envAddress("AERO_NONFUNGIBLEPOSITIONMANAGER")
+            );
+
+        address pool = seedPool(positionManager);
+
         hiroFactory = new HiroFactory(
             address(hiro),
+            pool,
+            weth,
+            router,
             100 ether,
             msg.sender,
             initialWhitelist,
@@ -71,47 +93,28 @@ contract Deploy is Script {
         );
         console.log("Hiro Factory deployed at:", address(hiroFactory));
 
-        INonfungiblePositionManager positionManager = INonfungiblePositionManager(
-                vm.envAddress("AERO_NONFUNGIBLEPOSITIONMANAGER")
-            );
-
-        seedPool(positionManager);
-
         vm.stopBroadcast();
     }
 
-    function seedPool(INonfungiblePositionManager positionManager) internal {
-        bool wethIsToken0 = weth < address(hiro);
+    function seedPool(
+        INonfungiblePositionManager positionManager
+    ) internal returns (address) {
+        PoolParams memory params = createPoolParams();
 
-        (address token0, address token1) = wethIsToken0
-            ? (weth, address(hiro))
-            : (address(hiro), weth);
-        (uint256 amount0Desired, uint256 amount1Desired) = wethIsToken0
-            ? (uint256(0), tokenAmount)
-            : (tokenAmount, uint256(0));
-
-        address tokenToApprove = wethIsToken0 ? address(hiro) : weth;
-
-        IERC20(tokenToApprove).approve(address(positionManager), tokenAmount);
-
-        int24 startingTick = int24(vm.envInt("STARTING_TICK"));
-
-        int24 tickUpper = nearestUsableTick(
-            wethIsToken0 ? startingTick : MAX_TICK
-        );
-        int24 tickLower = nearestUsableTick(
-            wethIsToken0 ? MIN_TICK : startingTick
+        IERC20(params.tokenToApprove).approve(
+            address(positionManager),
+            tokenAmount
         );
 
         INonfungiblePositionManager.MintParams
-            memory params = INonfungiblePositionManager.MintParams({
-                token0: token0,
-                token1: token1,
+            memory mintParams = INonfungiblePositionManager.MintParams({
+                token0: params.token0,
+                token1: params.token1,
                 tickSpacing: tickSpacing,
-                tickLower: tickLower,
-                tickUpper: tickUpper,
-                amount0Desired: amount0Desired,
-                amount1Desired: amount1Desired,
+                tickLower: params.tickLower,
+                tickUpper: params.tickUpper,
+                amount0Desired: params.amount0Desired,
+                amount1Desired: params.amount1Desired,
                 amount0Min: 0,
                 amount1Min: 0,
                 recipient: msg.sender,
@@ -124,22 +127,58 @@ contract Deploy is Script {
             uint128 liquidity,
             uint256 amount0,
             uint256 amount1
-        ) = positionManager.mint(params);
+        ) = positionManager.mint(mintParams);
 
         address pool = ICLFactory(positionManager.factory()).getPool(
-            token0,
-            token1,
+            params.token0,
+            params.token1,
             tickSpacing
         );
 
-        console.log("Liquidity added to:", pool);
-        console.log("  Token ID:", tokenId);
-        console.log("  Liquidity:", uint256(liquidity));
-        console.log("  Amount0 used:", amount0);
-        console.log("  Amount1 used:", amount1);
+        printResults(tokenId, liquidity, amount0, amount1);
+
+        return pool;
     }
 
     function nearestUsableTick(int24 tick) internal pure returns (int24) {
         return (tick / tickSpacing) * tickSpacing;
+    }
+
+    function createPoolParams()
+        internal
+        view
+        returns (PoolParams memory params)
+    {
+        params.wethIsToken0 = weth < address(hiro);
+
+        if (params.wethIsToken0) {
+            params.token0 = weth;
+            params.token1 = address(hiro);
+            params.amount0Desired = 0;
+            params.amount1Desired = tokenAmount;
+            params.tokenToApprove = address(hiro);
+            params.tickUpper = nearestUsableTick(startingTick);
+            params.tickLower = nearestUsableTick(MIN_TICK);
+        } else {
+            params.token0 = address(hiro);
+            params.token1 = weth;
+            params.amount0Desired = tokenAmount;
+            params.amount1Desired = 0;
+            params.tokenToApprove = weth;
+            params.tickLower = nearestUsableTick(startingTick);
+            params.tickUpper = nearestUsableTick(MAX_TICK);
+        }
+    }
+
+    function printResults(
+        uint256 tokenId,
+        uint128 liquidity,
+        uint256 amount0,
+        uint256 amount1
+    ) public pure {
+        console.log("Token ID:", tokenId);
+        console.log("Liquidity:", uint256(liquidity));
+        console.log("Amount0 used:", amount0);
+        console.log("Amount1 used:", amount1);
     }
 }
