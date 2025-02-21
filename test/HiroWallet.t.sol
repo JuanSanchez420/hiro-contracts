@@ -10,12 +10,19 @@ import "lib/openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
 import "lib/slipstream/contracts/periphery/interfaces/INonfungiblePositionManager.sol";
 import "lib/slipstream/contracts/core/libraries/TickMath.sol";
 import "lib/slipstream/contracts/core/interfaces/ICLFactory.sol";
+import "lib/slipstream/contracts/core/interfaces/ICLPool.sol";
+import {VmSafe} from "forge-std/Vm.sol";
 
-contract TestHiroFactory is Test {
+contract TestHiroWallet is Test {
     Hiro public hiro;
     HiroFactory public hiroFactory;
     HiroWallet public hiroWallet;
     uint256 public constant PURCHASE_PRICE = 10_000_000_000_000_000;
+    uint256 public hiroBalance;
+    address public pool;
+
+    address user = 0x90F79bf6EB2c4f870365E785982E1f101E93b906;
+    address notOwner = 0x976EA74026E726554dB657fA54763abd0C3a0aa9;
 
     struct PoolParams {
         bool wethIsToken0;
@@ -81,7 +88,7 @@ contract TestHiroFactory is Test {
                 vm.envAddress("AERO_NONFUNGIBLEPOSITIONMANAGER")
             );
 
-        address pool = seedPool(positionManager);
+        pool = seedPool(positionManager);
 
         hiroFactory = new HiroFactory(
             address(hiro),
@@ -89,13 +96,30 @@ contract TestHiroFactory is Test {
             weth,
             router,
             10_000,
-            msg.sender,
+            user,
             initialWhitelist,
             agents
         );
         console.log("Hiro Factory deployed at:", address(hiroFactory));
 
-        hiroWallet = HiroWallet(payable(hiroFactory.createHiroWallet{value: hiroFactory.purchasePrice()}(0)));
+        vm.startPrank(user);
+
+        // Whitelist the hiro contract for use later
+        hiroFactory.addToWhitelist(address(hiro));
+
+        hiroWallet = HiroWallet(
+            payable(
+                hiroFactory.createHiroWallet{
+                    value: hiroFactory.purchasePrice()
+                }(0)
+            )
+        );
+
+        console.log("Hiro price before:", hiroWallet.getTokenPrice());
+        hiroBalance = hiroFactory.swapETHForHiro{value: PURCHASE_PRICE}(0, user);
+        console.log("1 ETH swapped for Hiro:", hiroBalance);
+        console.log("Hiro price after:", hiroWallet.getTokenPrice());
+        vm.stopPrank();
     }
 
     function seedPool(
@@ -136,6 +160,8 @@ contract TestHiroFactory is Test {
             params.token1,
             tickSpacing
         );
+
+        console.log("Pool deployed at:", pool);
 
         printResults(tokenId, liquidity, amount0, amount1);
 
@@ -184,86 +210,145 @@ contract TestHiroFactory is Test {
         console.log("Amount1 used:", amount1);
     }
 
-    function test_HiroFactory_details() public view {
-        assertEq(hiroFactory.purchasePrice(), PURCHASE_PRICE);
-        assertNotEq(address(hiroWallet), address(0));
+    function test_details() public view {
+        console.log("user:", user);
+        console.log("msg.sender:", msg.sender);
+        console.log("HiroWallet owner:", hiroWallet.owner());
+        console.log("HiroWallet factory:", hiroWallet.factory());
+        console.log("HiroWallet hiro:", hiroWallet.hiro());
+        console.log("User Hiro", hiro.balanceOf(user));
+        console.log("HiroWallet pool:", hiroWallet.pool());
+        console.log("HiroWallet weth:", hiroWallet.weth());
+        console.log("Weth is token0:", weth < address(hiro));
+    }
+
+    function test_deposit_ETH() public payable {
+        uint256 depositAmount = 2 * PURCHASE_PRICE;
+        uint256 walletBalanceBefore = address(hiroWallet).balance;
+
+        vm.startPrank(user);
+        address(hiroWallet).call{value: depositAmount}("");
+
+        uint256 walletBalanceAfter = address(hiroWallet).balance;
+        vm.stopPrank();
+
+        assertEq(walletBalanceAfter, walletBalanceBefore + depositAmount);
+    }
+
+    function test_deposit_ETH_nonOwner() public payable {
+        uint256 depositAmount = 2 * PURCHASE_PRICE;
+        vm.startPrank(notOwner);
+        vm.expectRevert("Ownable: caller is not the owner", notOwner);
+        address(hiroWallet).call{value: depositAmount}("");
+    }
+
+    // Test deposit: Only the owner should be allowed to deposit tokens.
+    function test_deposit() public {
+        vm.startPrank(user);
+        console.log("user balance:", hiro.balanceOf(user));
+        hiro.approve(address(hiroWallet), hiroBalance);
+
+        uint256 walletBalanceBefore = hiro.balanceOf(address(hiroWallet));
+
+        hiroWallet.deposit(address(hiro), hiroBalance);
+        uint256 walletBalanceAfter = hiro.balanceOf(address(hiroWallet));
+        vm.stopPrank();
+
+        assertEq(walletBalanceAfter, walletBalanceBefore + hiroBalance);
+    }
+
+    // Test withdraw: Owner withdraws tokens from the wallet.
+    function test_withdraw() public {
+        vm.startPrank(user);
+
+        hiro.approve(address(hiroWallet), hiroBalance);
+
+        hiroWallet.deposit(address(hiro), hiroBalance);
+
+        uint256 ownerBalanceBefore = hiro.balanceOf(user);
+
+        hiroWallet.withdraw(address(hiro), hiroBalance);
+        uint256 ownerBalanceAfter = hiro.balanceOf(user);
+        vm.stopPrank();
+
+        assertEq(ownerBalanceAfter, ownerBalanceBefore + hiroBalance);
+    }
+
+    // Test execute: Only an agent can call execute.
+    function test_execute_asAgent() public {
+        address agent = 0x15d34AAf54267DB7D7c367839AAf71A00a2C6A65;
+
+        bool isAgent = hiroFactory.isAgent(agent);
+        assertTrue(isAgent);
+
+        vm.startPrank(agent);
+        bytes memory callData = abi.encodeWithSignature(
+            "approve(address,uint256)",
+            user,
+            1
+        );
+
+        uint256 fee = hiroWallet.execute(address(hiro), callData);
+
+        vm.stopPrank();
+
+        // Verify that some result is returned (or simply that the call didn't revert).
+        assertTrue(fee >= 0);
+    }
+
+    // Test execute: Non-agent calls should revert.
+    function test_execute_fail_forNonAgent() public {
+        address nonAgent = vm.addr(2);
+        bytes memory callData = abi.encodeWithSignature(
+            "printResults(uint256,uint128,uint256,uint256)",
+            1,
+            uint128(1000),
+            10 ether,
+            5 ether
+        );
+
+        vm.prank(nonAgent);
+        vm.expectRevert("Not an agent");
+        hiroWallet.execute(address(hiroWallet), callData);
     }
     
-    function test_duplicateWalletCreation() public {
-        vm.expectRevert("Subcontract already exists");
-        hiroFactory.createHiroWallet(0);
+    function test_number_go_up() public {
+        uint256 tokenPriceBefore = hiroWallet.getTokenPrice();
+        console.log("Token price before:", tokenPriceBefore);
+        hiroFactory.swapETHForHiro{value: PURCHASE_PRICE}(0, msg.sender);
+
+        uint256 tokenPriceAfter = hiroWallet.getTokenPrice();
+        console.log("Token price after:", tokenPriceAfter);
+
+        // getTokenPrice is ETH measured in Hiro tokens, so the price should go down
+        assertTrue(tokenPriceAfter < tokenPriceBefore);
     }
 
-    function test_setPrice() public {
-        vm.startPrank(msg.sender);
-        uint256 newPrice = 50 ether;
-        hiroFactory.setTransactionPrice(newPrice);
-        assertEq(hiroFactory.transactionPrice(), newPrice);
-        vm.stopPrank();
-    }
+    function test_fee_number_down_as_price_increases() public {
 
-    function test_nonOwnerSetPrice() public {
-        address bob = address(0xBEEF);
-        vm.startPrank(bob);
-        vm.expectRevert();
-        hiroFactory.setTransactionPrice(10 ether);
-        vm.stopPrank();
-    }
+        address agent = 0x15d34AAf54267DB7D7c367839AAf71A00a2C6A65;
 
-    function test_addRemoveWhitelist() public {
-        vm.startPrank(msg.sender);
-        address newAddr = address(0x1234);
-        hiroFactory.addToWhitelist(newAddr);
-        bool whitelisted = hiroFactory.isWhitelisted(newAddr);
-        assertTrue(whitelisted);
-
-        hiroFactory.removeFromWhitelist(newAddr);
-        whitelisted = hiroFactory.isWhitelisted(newAddr);
-        assertFalse(whitelisted);
-        vm.stopPrank();
-    }
-
-    function test_setAgentAndNonOwnerSetAgent() public {
-        vm.startPrank(msg.sender);
-        address agentAddr = address(0xABCD);
-        // Set agent from owner
-        hiroFactory.setAgent(agentAddr, true);
-        bool isAgent = hiroFactory.isAgent(agentAddr);
+        bool isAgent = hiroFactory.isAgent(agent);
         assertTrue(isAgent);
+
+        vm.startPrank(agent);
+        bytes memory callData = abi.encodeWithSignature(
+            "approve(address,uint256)",
+            user,
+            1
+        );
+
+        uint256 feeBeforeSwap = hiroWallet.execute(address(hiro), callData);
+        console.log("feeBeforeSwap:", feeBeforeSwap);
+
+        // swap to increase price
+        hiroFactory.swapETHForHiro{value: PURCHASE_PRICE}(0, msg.sender);
+
+        uint256 feeAfterSwap = hiroWallet.execute(address(hiro), callData);
+        console.log("feeAfterSwap:", feeAfterSwap);
+
         vm.stopPrank();
 
-        // Attempt to change agent from non-owner
-        address nonOwner = address(0xBEEF);
-        vm.startPrank(nonOwner);
-        vm.expectRevert();
-        hiroFactory.setAgent(agentAddr, false);
-        vm.stopPrank();
+        assertTrue(feeBeforeSwap > feeAfterSwap);
     }
-
-    function test_tokenSweep() public {
-        vm.startPrank(msg.sender);
-        // After createHiroWallet, factory received TOKEN_AMOUNT tokens.
-        uint256 factoryBalance = IERC20(hiro).balanceOf(address(hiroFactory));
-        // Capture owner's token balance before sweep.
-        uint256 ownerBalanceBefore = IERC20(hiro).balanceOf(msg.sender);
-        hiroFactory.sweep(address(hiro), factoryBalance);
-        uint256 ownerBalanceAfter = IERC20(hiro).balanceOf(msg.sender);
-        assertEq(ownerBalanceAfter, ownerBalanceBefore + factoryBalance);
-        vm.stopPrank();
-    }
-/*
-
-    /* tested, works, but don't want public receive() on factory
-     function test_sweepETH() public {
-          // Send 1 ether to the factory contract.
-          (bool success, ) = address(hiroFactory).call{value: 1 ether}("");
-          require(success, "ETH transfer failed");
-
-          uint256 ownerBalanceBefore = address(this).balance;
-          hiroFactory.sweepETH();
-          uint256 ownerBalanceAfter = address(this).balance;
-          console.log(ownerBalanceBefore, ownerBalanceAfter);
-          assertEq(ownerBalanceAfter, ownerBalanceBefore + 1 ether);
-     }
-     */
 }

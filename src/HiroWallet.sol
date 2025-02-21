@@ -7,9 +7,9 @@ import "lib/openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
 import "lib/openzeppelin-contracts/contracts/access/AccessControl.sol";
 import "lib/slipstream/contracts/core/libraries/FullMath.sol";
 import "lib/slipstream/contracts/core/CLPool.sol";
+import "lib/openzeppelin-contracts/contracts/utils/ReentrancyGuard.sol";
 
-
-contract HiroWallet {
+contract HiroWallet is ReentrancyGuard {
     address public immutable owner;
     address public immutable factory;
     address public immutable hiro;
@@ -34,19 +34,14 @@ contract HiroWallet {
         _;
     }
 
-    event Executed(
-        address indexed target,
-        address indexed caller,
-        bytes data,
-        bytes result
-    );
+    event Executed(address indexed target, address indexed caller, uint256 fee);
 
     constructor(
         address _owner,
         address _hiro,
         address _pool,
         address _weth
-    ) payable {
+    ) payable nonReentrant() {
         owner = _owner;
         hiro = _hiro;
         pool = _pool;
@@ -62,42 +57,44 @@ contract HiroWallet {
     receive() external payable onlyOwner {}
 
     function withdraw(address token, uint256 amount) external onlyOwner {
-        IERC20(token).transfer(msg.sender, amount);
+        bool success = IERC20(token).transfer(msg.sender, amount);
+        require(success, "Transfer failed");
     }
 
     function withdrawETH(uint256 amount) external onlyOwner {
         payable(msg.sender).transfer(amount);
     }
 
+    // returns ETH priced in Hiro tokens
     function getTokenPrice() public view returns (uint256) {
         (uint160 sqrtPriceX96, , , , , ) = ICLPool(pool).slot0();
 
-        // Convert the Q64.96 sqrt price to a regular uint256 price.
-        // The formula is: price = (sqrtPriceX96^2) / 2^192
-        uint256 price = FullMath.mulDiv(sqrtPriceX96, sqrtPriceX96, 1 << 192);
+        // Convert Q64.96 to regular price
+        uint256 price = (uint256(sqrtPriceX96) * uint256(sqrtPriceX96)) >> 192;
+        require(price > 0, "Invalid token price");
 
-        // TODO: looks wrong
-        return weth < hiro ? 1 / price : price;
+        return weth < hiro ? price : 1 / price;
     }
 
     // Agent functions
     function execute(
         address target,
         bytes calldata data
-    ) external onlyAgent onlyWhitelisted(target) returns (bytes memory) {
+    ) external onlyAgent onlyWhitelisted(target) returns (uint256) {
         uint256 gasStart = gasleft();
 
-        (bool success, bytes memory result) = target.call(data);
+        (bool success, ) = target.call(data);
         require(success, "Call failed");
+
+        uint256 feeBasisPoints = IHiroFactory(factory).transactionPrice();
 
         uint256 gasUsed = gasStart - gasleft();
         uint256 gasCost = gasUsed * tx.gasprice;
+        uint256 feeInEth = (gasCost * feeBasisPoints) / 10000;
 
-        // Calculate requiredTokens using feeBasisPoints in basis points.
-        // Dividing by 10000 converts basis points to a multiplier.
-        uint256 feeBasisPoints = IHiroFactory(factory).purchasePrice();
-        uint256 requiredTokens = (gasCost * feeBasisPoints) /
-            (10000 * getTokenPrice());
+        uint256 tokenPrice = getTokenPrice();
+
+        uint256 requiredTokens = feeInEth * tokenPrice;
 
         require(
             IERC20(hiro).balanceOf(address(this)) >= requiredTokens,
@@ -106,7 +103,6 @@ contract HiroWallet {
 
         IERC20(hiro).transfer(address(factory), requiredTokens);
 
-        emit Executed(target, msg.sender, data, result);
-        return result;
+        return requiredTokens;
     }
 }

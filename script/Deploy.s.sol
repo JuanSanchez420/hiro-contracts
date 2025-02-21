@@ -86,7 +86,7 @@ contract Deploy is Script {
             pool,
             weth,
             router,
-            100 ether,
+            10_000,
             msg.sender,
             initialWhitelist,
             agents

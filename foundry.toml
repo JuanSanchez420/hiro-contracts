@@ -5,6 +5,7 @@ out = "out"
 libs = ["lib"]
 exclude = ["lib/**"]
 dotenv = true
+gas_price = 1000000000
 
 fs_permissions = [
     { access = "read", path = "./script/whitelist.json" }

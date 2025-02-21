@@ -8,8 +8,9 @@ import "lib/openzeppelin-contracts/contracts/access/Ownable.sol";
 import "lib/slipstream/contracts/core/interfaces/ICLFactory.sol";
 import "lib/slipstream/contracts/core/interfaces/ICLPool.sol";
 import "lib/slipstream/contracts/periphery/interfaces/ISwapRouter.sol";
+import "lib/openzeppelin-contracts/contracts/utils/ReentrancyGuard.sol";
 
-contract HiroFactory is Ownable, IHiroFactory {
+contract HiroFactory is Ownable, IHiroFactory, ReentrancyGuard {
     event TransactionPriceSet(uint256 price);
     event HiroCreated(address indexed owner, address indexed wallet);
     event Whitelisted(address indexed addr);
@@ -53,12 +54,9 @@ contract HiroFactory is Ownable, IHiroFactory {
         }
     }
 
-    function createHiroWallet()
-        external
-        payable
-        override
-        returns (address payable)
-    {
+    function createHiroWallet(
+        uint256 amountOutMinimum
+    ) external payable override nonReentrant returns (address payable) {
         require(
             ownerToWallet[msg.sender] == address(0),
             "Subcontract already exists"
@@ -68,12 +66,15 @@ contract HiroFactory is Ownable, IHiroFactory {
 
         uint256 remaining = msg.value - purchasePrice;
 
-        // do swap with purchase price
-        // TODO: maybe recipient
-        uint256 tokens = swapETHForHiro();
+        uint256 tokens = _swapETHForHiro(amountOutMinimum);
 
-        HiroWallet wallet = new HiroWallet{value: remaining}(msg.sender, hiro, pool, weth);
-        IERC20(hiro).transfer(msg.sender, tokens);
+        HiroWallet wallet = new HiroWallet{value: remaining}(
+            msg.sender,
+            hiro,
+            pool,
+            weth
+        );
+        IERC20(hiro).transfer(address(wallet), tokens);
 
         ownerToWallet[msg.sender] = address(wallet);
 
@@ -82,14 +83,34 @@ contract HiroFactory is Ownable, IHiroFactory {
         return payable(wallet);
     }
 
-    function swapETHForHiro() internal returns (uint256 amountOut) {
-        require(address(this).balance >= purchasePrice, "Not enough ETH");
+    function swapETHForHiro(
+        uint256 amountOutMinimum,
+        address recipient
+    ) external payable override nonReentrant returns (uint256 amountOut) {
+        ISwapRouter.ExactInputSingleParams memory params = ISwapRouter
+            .ExactInputSingleParams({
+                tokenIn: weth,
+                tokenOut: hiro,
+                tickSpacing: ICLPool(pool).tickSpacing(),
+                recipient: recipient,
+                deadline: block.timestamp + 300,
+                amountIn: msg.value,
+                amountOutMinimum: amountOutMinimum,
+                sqrtPriceLimitX96: 0
+            });
 
-        // 2% slippage
-        // TODO: quoter
-        uint256 amountOutMinimum = (0 * 98) / 100;
+        amountOut = ISwapRouter(swapRouter).exactInputSingle{value: msg.value}(
+            params
+        );
 
-        // TODO: quoter
+        require(amountOut >= amountOutMinimum, "Slippage");
+    }
+
+    function _swapETHForHiro(
+        uint256 amountOutMinimum
+    ) internal returns (uint256 amountOut) {
+        require(msg.value >= purchasePrice, "Insufficient funds");
+
         ISwapRouter.ExactInputSingleParams memory params = ISwapRouter
             .ExactInputSingleParams({
                 tokenIn: weth,
@@ -98,15 +119,20 @@ contract HiroFactory is Ownable, IHiroFactory {
                 recipient: address(this),
                 deadline: block.timestamp + 300,
                 amountIn: purchasePrice,
-                amountOutMinimum: 0,
+                amountOutMinimum: amountOutMinimum,
                 sqrtPriceLimitX96: 0
             });
 
-        amountOut = ISwapRouter(swapRouter).exactInputSingle{value: msg.value}(params);
+        amountOut = ISwapRouter(swapRouter).exactInputSingle{
+            value: purchasePrice
+        }(params);
+
+        require(amountOut >= amountOutMinimum, "Slippage");
     }
 
     function sweep(address token, uint256 amount) external override onlyOwner {
-        IERC20(token).transfer(msg.sender, amount);
+        bool success = IERC20(token).transfer(msg.sender, amount);
+        require(success, "Transfer failed");
     }
 
     function sweepETH() external override onlyOwner {
