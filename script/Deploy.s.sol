@@ -81,6 +81,8 @@ contract Deploy is Script {
 
         address pool = seedPool(positionManager);
 
+        console.log("Pool deployed at:", pool);
+
         hiroFactory = new HiroFactory(
             address(hiro),
             pool,
