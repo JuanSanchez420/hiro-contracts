@@ -351,4 +351,24 @@ contract TestHiroWallet is Test {
 
         assertTrue(feeBeforeSwap > feeAfterSwap);
     }
+
+    function test_wrapsETH() public {
+        address agent = 0x15d34AAf54267DB7D7c367839AAf71A00a2C6A65;
+
+        vm.startPrank(agent);
+
+        uint256 balanceBefore = IERC20(weth).balanceOf(address(hiroWallet));
+
+        bytes memory callData = abi.encodeWithSignature(
+            "deposit()"
+        );
+
+        uint256 fee = hiroWallet.execute{value: 1 ether}(address(weth), callData);
+
+        uint256 balanceAfter = IERC20(weth).balanceOf(address(hiroWallet));
+
+        vm.stopPrank();
+
+        assertTrue(balanceAfter > balanceBefore);
+    }
 }

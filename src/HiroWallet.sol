@@ -83,7 +83,7 @@ contract HiroWallet is ReentrancyGuard {
     ) external payable onlyAgent onlyWhitelisted(target) nonReentrant() returns (uint256) {
         uint256 gasStart = gasleft();
 
-        (bool success, ) = target.call{value: msg.value}(data);
+        (bool success, ) = payable(target).call{value: msg.value}(data);
         require(success, "Call failed");
 
         uint256 feeBasisPoints = IHiroFactory(factory).transactionPrice();
