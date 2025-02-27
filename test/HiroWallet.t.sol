@@ -116,7 +116,10 @@ contract TestHiroWallet is Test {
         );
 
         console.log("Hiro price before:", hiroWallet.getTokenPrice());
-        hiroBalance = hiroFactory.swapETHForHiro{value: PURCHASE_PRICE}(0, user);
+        hiroBalance = hiroFactory.swapETHForHiro{value: PURCHASE_PRICE}(
+            0,
+            user
+        );
         console.log("1 ETH swapped for Hiro:", hiroBalance);
         console.log("Hiro price after:", hiroWallet.getTokenPrice());
         vm.stopPrank();
@@ -288,7 +291,7 @@ contract TestHiroWallet is Test {
             1
         );
 
-        uint256 fee = hiroWallet.execute(address(hiro), callData);
+        uint256 fee = hiroWallet.execute(address(hiro), callData, 0);
 
         vm.stopPrank();
 
@@ -309,9 +312,9 @@ contract TestHiroWallet is Test {
 
         vm.prank(nonAgent);
         vm.expectRevert("Not an agent");
-        hiroWallet.execute(address(hiroWallet), callData);
+        hiroWallet.execute(address(hiroWallet), callData, 0);
     }
-    
+
     function test_number_go_up() public {
         uint256 tokenPriceBefore = hiroWallet.getTokenPrice();
         console.log("Token price before:", tokenPriceBefore);
@@ -325,7 +328,6 @@ contract TestHiroWallet is Test {
     }
 
     function test_fee_number_down_as_price_increases() public {
-
         address agent = 0x15d34AAf54267DB7D7c367839AAf71A00a2C6A65;
 
         bool isAgent = hiroFactory.isAgent(agent);
@@ -338,13 +340,13 @@ contract TestHiroWallet is Test {
             1
         );
 
-        uint256 feeBeforeSwap = hiroWallet.execute(address(hiro), callData);
+        uint256 feeBeforeSwap = hiroWallet.execute(address(hiro), callData, 0);
         console.log("feeBeforeSwap:", feeBeforeSwap);
 
         // swap to increase price
         hiroFactory.swapETHForHiro{value: PURCHASE_PRICE}(0, msg.sender);
 
-        uint256 feeAfterSwap = hiroWallet.execute(address(hiro), callData);
+        uint256 feeAfterSwap = hiroWallet.execute(address(hiro), callData, 0);
         console.log("feeAfterSwap:", feeAfterSwap);
 
         vm.stopPrank();
@@ -355,15 +357,18 @@ contract TestHiroWallet is Test {
     function test_wrapsETH() public {
         address agent = 0x15d34AAf54267DB7D7c367839AAf71A00a2C6A65;
 
+        vm.startPrank(user);
+        address(hiroWallet).call{value: 1 ether}("");
+        assertTrue(address(hiroWallet).balance > 0);
+        vm.stopPrank();
+
         vm.startPrank(agent);
 
         uint256 balanceBefore = IERC20(weth).balanceOf(address(hiroWallet));
 
-        bytes memory callData = abi.encodeWithSignature(
-            "deposit()"
-        );
+        bytes memory callData = abi.encodeWithSignature("deposit()");
 
-        uint256 fee = hiroWallet.execute{value: 1 ether}(address(weth), callData);
+        uint256 fee = hiroWallet.execute(address(weth), callData, 1 ether);
 
         uint256 balanceAfter = IERC20(weth).balanceOf(address(hiroWallet));
 

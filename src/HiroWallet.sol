@@ -54,7 +54,7 @@ contract HiroWallet is ReentrancyGuard {
         IERC20(token).transferFrom(msg.sender, address(this), amount);
     }
 
-    receive() external payable onlyOwner {}
+    receive() external payable onlyOwner nonReentrant() {}
 
     function withdraw(address token, uint256 amount) external onlyOwner {
         bool success = IERC20(token).transfer(msg.sender, amount);
@@ -79,11 +79,14 @@ contract HiroWallet is ReentrancyGuard {
     // Agent functions
     function execute(
         address target,
-        bytes calldata data
-    ) external payable onlyAgent onlyWhitelisted(target) nonReentrant() returns (uint256) {
+        bytes calldata data,
+        uint256 ethAmount
+    ) external onlyAgent onlyWhitelisted(target) returns (uint256) {
+        require(ethAmount >= address(this).balance, "Incorrect ETH amount");
+
         uint256 gasStart = gasleft();
 
-        (bool success, ) = payable(target).call{value: msg.value}(data);
+        (bool success, ) = payable(target).call{value: ethAmount}(data);
         require(success, "Call failed");
 
         uint256 feeBasisPoints = IHiroFactory(factory).transactionPrice();
