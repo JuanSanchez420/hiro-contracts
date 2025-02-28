@@ -11,6 +11,7 @@ import "lib/slipstream/contracts/periphery/interfaces/INonfungiblePositionManage
 import "lib/slipstream/contracts/core/libraries/TickMath.sol";
 import "lib/slipstream/contracts/core/interfaces/ICLFactory.sol";
 import "lib/slipstream/contracts/core/interfaces/ICLPool.sol";
+import "lib/slipstream/contracts/periphery/interfaces/ISwapRouter.sol";
 import {VmSafe} from "forge-std/Vm.sol";
 
 contract TestHiroWallet is Test {
@@ -248,7 +249,7 @@ contract TestHiroWallet is Test {
     // Test deposit: Only the owner should be allowed to deposit tokens.
     function test_deposit() public {
         vm.startPrank(user);
-        console.log("user balance:", hiro.balanceOf(user));
+
         hiro.approve(address(hiroWallet), hiroBalance);
 
         uint256 walletBalanceBefore = hiro.balanceOf(address(hiroWallet));
@@ -375,5 +376,128 @@ contract TestHiroWallet is Test {
         vm.stopPrank();
 
         assertTrue(balanceAfter > balanceBefore);
+    }
+
+    function swapETHForUSDC(
+        address recipient,
+        uint256 ethAmount
+    ) internal returns (uint256) {
+        address usdc = 0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913;
+
+        // Create the swap path: ETH → WETH → USDC
+        bytes memory path = abi.encodePacked(
+            weth,
+            uint24(100),
+            usdc
+        );
+
+        // Set up the parameters for the swap
+        ISwapRouter.ExactInputParams memory params = ISwapRouter
+            .ExactInputParams({
+                path: path,
+                recipient: recipient,
+                deadline: block.timestamp + 15 minutes,
+                amountIn: ethAmount,
+                amountOutMinimum: 0
+            });
+
+        uint256 amountOut = ISwapRouter(router).exactInput{
+            value: ethAmount
+        }(params);
+
+        return amountOut;
+    }
+
+    function testAddLiquidityWETHUSDC() public {
+        address agent = 0x15d34AAf54267DB7D7c367839AAf71A00a2C6A65;
+        address usdc = 0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913; // USDC mainnet address
+        address nonFungiblePositionManager = 0x827922686190790b37229fd06084350E74485b72;
+
+        // Setup: Ensure wallet has WETH and USDC tokens
+        vm.deal(address(hiroWallet), 10 ether);
+
+        // Convert some ETH to WETH for the wallet
+        vm.startPrank(agent);
+        bytes memory depositCallData = abi.encodeWithSignature("deposit()");
+        hiroWallet.execute(address(weth), depositCallData, 2 ether);
+        vm.stopPrank();
+
+        // Give the wallet some USDC
+        uint256 usdcAmount = swapETHForUSDC(address(hiroWallet), 2 ether);
+
+        // Approve NPM to use tokens from wallet
+        vm.startPrank(user);
+        bytes memory wethApproveCallData = abi.encodeWithSignature(
+            "approve(address,uint256)",
+            address(nonFungiblePositionManager),
+            2 ether
+        );
+
+        bytes memory usdcApproveCallData = abi.encodeWithSignature(
+            "approve(address,uint256)",
+            address(nonFungiblePositionManager),
+            usdcAmount
+        );
+
+        hiroWallet.execute(address(weth), wethApproveCallData, 0);
+        hiroWallet.execute(usdc, usdcApproveCallData, 0);
+        vm.stopPrank();
+
+        // Setup agent to call execute
+        vm.startPrank(agent);
+
+        // Define token order
+        address token0 = usdc < address(weth) ? usdc : address(weth);
+        address token1 = usdc < address(weth) ? address(weth) : usdc;
+
+        // For full range liquidity in V3, we need to set tickLower and tickUpper to min/max values
+        int24 tickSpacing = 100;
+        int24 minTick = -887272; // Minimum tick for full range (based on 0.3% fee tier)
+        int24 maxTick = 887272; // Maximum tick for full range (based on 0.3% fee tier)
+
+        // Ensure ticks are multiples of the spacing
+        minTick = (minTick / tickSpacing) * tickSpacing;
+        maxTick = (maxTick / tickSpacing) * tickSpacing;
+
+        // Params for adding liquidity
+        INonfungiblePositionManager.MintParams
+            memory params = INonfungiblePositionManager.MintParams({
+                token0: token0,
+                token1: token1,
+                tickSpacing: tickSpacing,
+                tickLower: minTick,
+                tickUpper: maxTick,
+                amount0Desired: token0 == usdc ? usdcAmount : 1 ether,
+                amount1Desired: token1 == usdc ? usdcAmount : 1 ether,
+                amount0Min: 0,
+                amount1Min: 0,
+                recipient: address(hiroWallet),
+                deadline: block.timestamp + 15 minutes,
+                sqrtPriceX96: 0
+            });
+
+        bytes memory mintCallData = abi.encodeWithSelector(
+            INonfungiblePositionManager.mint.selector,
+            params
+        );
+
+        // Execute the add liquidity call
+        uint256 fee = hiroWallet.execute(
+            address(nonFungiblePositionManager),
+            mintCallData,
+            0
+        );
+
+        vm.stopPrank();
+
+        // Verify position was created
+        uint256 balanceOfNFTs = IERC721(address(nonFungiblePositionManager))
+            .balanceOf(address(hiroWallet));
+
+        assertEq(
+            balanceOfNFTs,
+            1,
+            "Wallet should have received 1 position NFT"
+        );
     }
 }
