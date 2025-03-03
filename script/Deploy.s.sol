@@ -71,8 +71,7 @@ contract Deploy is Script {
         vm.startBroadcast();
 
         hiro = new Hiro();
-        hiro.transfer(msg.sender, hiro.balanceOf(address(this)));
-        console.log("Hiro tokens transferred to deployer");
+
         console.log("Hiro deployed at:", address(hiro));
 
         INonfungiblePositionManager positionManager = INonfungiblePositionManager(
@@ -166,7 +165,7 @@ contract Deploy is Script {
             params.token1 = weth;
             params.amount0Desired = tokenAmount;
             params.amount1Desired = 0;
-            params.tokenToApprove = weth;
+            params.tokenToApprove = address(hiro);
             params.tickLower = nearestUsableTick(startingTick);
             params.tickUpper = nearestUsableTick(MAX_TICK);
         }
