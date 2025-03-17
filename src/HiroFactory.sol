@@ -5,9 +5,6 @@ pragma abicoder v2;
 import "./HiroWallet.sol";
 import "./interfaces/IHiroFactory.sol";
 import "lib/openzeppelin-contracts/contracts/access/Ownable.sol";
-import "lib/slipstream/contracts/core/interfaces/ICLFactory.sol";
-import "lib/slipstream/contracts/core/interfaces/ICLPool.sol";
-import "lib/slipstream/contracts/periphery/interfaces/ISwapRouter.sol";
 import "lib/openzeppelin-contracts/contracts/utils/ReentrancyGuard.sol";
 
 contract HiroFactory is Ownable, IHiroFactory, ReentrancyGuard {
@@ -17,10 +14,6 @@ contract HiroFactory is Ownable, IHiroFactory, ReentrancyGuard {
     event RemovedFromWhitelist(address indexed addr);
 
     mapping(address => address) public override ownerToWallet;
-    address public immutable hiro;
-    address public immutable pool;
-    address public immutable weth;
-    address public immutable swapRouter;
 
     mapping(address => bool) private whitelist;
     mapping(address => bool) private agents;
@@ -29,19 +22,11 @@ contract HiroFactory is Ownable, IHiroFactory, ReentrancyGuard {
     uint256 public immutable override purchasePrice = 10_000_000_000_000_000; // 0.01 ETH
 
     constructor(
-        address _hiro,
-        address _pool,
-        address _weth,
-        address _swapRouter,
         uint256 _transactionPrice,
         address factoryOwner,
         address[] memory _whitelist,
         address[] memory _agents
     ) {
-        hiro = _hiro;
-        pool = _pool;
-        weth = _weth;
-        swapRouter = _swapRouter;
         transactionPrice = _transactionPrice;
         transferOwnership(factoryOwner);
 
@@ -54,9 +39,13 @@ contract HiroFactory is Ownable, IHiroFactory, ReentrancyGuard {
         }
     }
 
-    function createHiroWallet(
-        uint256 amountOutMinimum
-    ) external payable override nonReentrant returns (address payable) {
+    function createHiroWallet()
+        external
+        payable
+        override
+        nonReentrant
+        returns (address payable)
+    {
         require(
             ownerToWallet[msg.sender] == address(0),
             "Subcontract already exists"
@@ -66,68 +55,13 @@ contract HiroFactory is Ownable, IHiroFactory, ReentrancyGuard {
 
         uint256 remaining = msg.value - purchasePrice;
 
-        uint256 tokens = _swapETHForHiro(amountOutMinimum);
-
-        HiroWallet wallet = new HiroWallet{value: remaining}(
-            msg.sender,
-            hiro,
-            pool,
-            weth
-        );
-        IERC20(hiro).transfer(address(wallet), tokens);
+        HiroWallet wallet = new HiroWallet{value: remaining}(msg.sender);
 
         ownerToWallet[msg.sender] = address(wallet);
 
         emit HiroCreated(msg.sender, address(wallet));
 
         return payable(wallet);
-    }
-
-    function swapETHForHiro(
-        uint256 amountOutMinimum,
-        address recipient
-    ) external payable override nonReentrant returns (uint256 amountOut) {
-        ISwapRouter.ExactInputSingleParams memory params = ISwapRouter
-            .ExactInputSingleParams({
-                tokenIn: weth,
-                tokenOut: hiro,
-                tickSpacing: ICLPool(pool).tickSpacing(),
-                recipient: recipient,
-                deadline: block.timestamp + 300,
-                amountIn: msg.value,
-                amountOutMinimum: amountOutMinimum,
-                sqrtPriceLimitX96: 0
-            });
-
-        amountOut = ISwapRouter(swapRouter).exactInputSingle{value: msg.value}(
-            params
-        );
-
-        require(amountOut >= amountOutMinimum, "Slippage");
-    }
-
-    function _swapETHForHiro(
-        uint256 amountOutMinimum
-    ) internal returns (uint256 amountOut) {
-        require(msg.value >= purchasePrice, "Insufficient funds");
-
-        ISwapRouter.ExactInputSingleParams memory params = ISwapRouter
-            .ExactInputSingleParams({
-                tokenIn: weth,
-                tokenOut: hiro,
-                tickSpacing: ICLPool(pool).tickSpacing(),
-                recipient: address(this),
-                deadline: block.timestamp + 300,
-                amountIn: purchasePrice,
-                amountOutMinimum: amountOutMinimum,
-                sqrtPriceLimitX96: 0
-            });
-
-        amountOut = ISwapRouter(swapRouter).exactInputSingle{
-            value: purchasePrice
-        }(params);
-
-        require(amountOut >= amountOutMinimum, "Slippage");
     }
 
     function sweep(address token, uint256 amount) external override onlyOwner {
