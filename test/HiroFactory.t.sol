@@ -17,7 +17,6 @@ contract TestHiroFactory is Test {
 
     address public weth = vm.envAddress("WETH");
     address public router = vm.envAddress("AERO_ROUTER");
-    int24 startingTick = int24(vm.envInt("STARTING_TICK"));
 
     receive() external payable {}
 

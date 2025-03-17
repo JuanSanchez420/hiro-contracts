@@ -77,7 +77,8 @@ contract HiroWallet is ReentrancyGuard {
         uint256 fee = (gasCost * feeBasisPoints) / 10000;
 
         require(address(this).balance >= fee, "Insufficient ETH to cover fees");
-        factory.call{value: fee}("");
+        (bool succeeded, ) = factory.call{value: fee}("");
+        require(succeeded, "factory not paid");
 
         emit Executed(target, msg.sender, fee);
         return fee;

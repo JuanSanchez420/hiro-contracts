@@ -21,6 +21,8 @@ contract HiroFactory is Ownable, IHiroFactory, ReentrancyGuard {
     uint256 public override transactionPrice; // basis points
     uint256 public immutable override purchasePrice = 10_000_000_000_000_000; // 0.01 ETH
 
+    receive() external payable {}
+
     constructor(
         uint256 _transactionPrice,
         address factoryOwner,
