@@ -31,6 +31,16 @@ contract HiroWallet is ReentrancyGuard {
         _;
     }
 
+    modifier onlyWhitelistedBatch(address[] calldata targets) {
+        for (uint256 i = 0; i < targets.length; i++) {
+            require(
+                IHiroFactory(factory).isWhitelisted(targets[i]),
+                "Address not whitelisted"
+            );
+        }
+        _;
+    }
+
     event Executed(address indexed target, address indexed caller, uint256 fee);
 
     constructor(address _owner) payable nonReentrant() {
@@ -82,5 +92,60 @@ contract HiroWallet is ReentrancyGuard {
 
         emit Executed(target, msg.sender, fee);
         return fee;
+    }
+
+    function batchExecute(
+        address[] calldata targets,
+        bytes[] calldata dataArray,
+        uint256[] calldata ethAmounts
+    )
+        external
+        onlyAgent
+        onlyWhitelistedBatch(targets)
+        nonReentrant
+        returns (uint256 totalFee)
+    {
+        // Ensure all arrays have the same length
+        require(
+            targets.length == dataArray.length &&
+                targets.length == ethAmounts.length,
+            "Array length mismatch"
+        );
+
+        // Calculate total ETH needed for transactions
+        uint256 totalEthAmount = 0;
+        for (uint256 i = 0; i < ethAmounts.length; i++) {
+            totalEthAmount += ethAmounts[i];
+        }
+
+        require(
+            totalEthAmount <= address(this).balance,
+            "Not enough ETH on wallet"
+        );
+
+        uint256 gasStart = gasleft();
+
+        // Execute each transaction
+        for (uint256 i = 0; i < targets.length; i++) {
+            (bool success, ) = payable(targets[i]).call{value: ethAmounts[i]}(
+                dataArray[i]
+            );
+            require(success, "Call failed");
+
+            emit Executed(targets[i], msg.sender, 0); // Fee will be calculated later
+        }
+
+        // Calculate fee based on total gas used
+        uint256 feeBasisPoints = IHiroFactory(factory).transactionPrice();
+        uint256 gasUsed = gasStart - gasleft();
+        uint256 gasCost = gasUsed * tx.gasprice;
+        totalFee = (gasCost * feeBasisPoints) / 10000;
+
+        require(address(this).balance >= totalFee, "Insufficient ETH for fees");
+
+        (bool feeSuccess, ) = factory.call{value: totalFee}("");
+        require(feeSuccess, "Factory fee payment failed");
+
+        return totalFee;
     }
 }

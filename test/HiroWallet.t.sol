@@ -13,6 +13,17 @@ import "lib/slipstream/contracts/core/interfaces/ICLPool.sol";
 import "lib/slipstream/contracts/periphery/interfaces/ISwapRouter.sol";
 import {VmSafe} from "forge-std/Vm.sol";
 
+// Simple mock contract for testing function calls
+contract MockContract {
+    uint256 public value;
+
+    function setValue(uint256 newValue) external payable {
+        value = newValue;
+    }
+
+    receive() external payable {}
+}
+
 contract TestHiroWallet is Test {
     HiroFactory public hiroFactory;
     HiroWallet public hiroWallet;
@@ -20,6 +31,7 @@ contract TestHiroWallet is Test {
 
     address user = 0x90F79bf6EB2c4f870365E785982E1f101E93b906;
     address notOwner = 0x976EA74026E726554dB657fA54763abd0C3a0aa9;
+    address[] agents;
 
     address public weth = vm.envAddress("WETH");
     address public router = vm.envAddress("AERO_ROUTER");
@@ -54,9 +66,9 @@ contract TestHiroWallet is Test {
             count++;
         }
         // Copy found addresses into a dynamic array of exact length.
-        address[] memory agents = new address[](count);
+        // address[] memory agents = new address[](count);
         for (uint256 i = 0; i < count; i++) {
-            agents[i] = agentsTemp[i];
+            agents.push(agentsTemp[i]);
         }
 
         INonfungiblePositionManager positionManager = INonfungiblePositionManager(
@@ -300,6 +312,250 @@ contract TestHiroWallet is Test {
             balanceOfNFTs,
             1,
             "Wallet should have received 1 position NFT"
+        );
+    }
+
+    function testBatchExecute() public {
+        // Deploy mock contracts
+        MockContract mock1 = new MockContract();
+        MockContract mock2 = new MockContract();
+        MockContract mock3 = new MockContract();
+
+        // Add mocks to whitelist
+        vm.startPrank(user);
+        hiroFactory.addToWhitelist(address(mock1));
+        hiroFactory.addToWhitelist(address(mock2));
+        hiroFactory.addToWhitelist(address(mock3));
+        vm.stopPrank();
+
+        // Fund the wallet
+        vm.deal(address(hiroWallet), 10 ether);
+
+        // Prepare batch data
+        address[] memory targets = new address[](3);
+        bytes[] memory dataArray = new bytes[](3);
+        uint256[] memory ethAmounts = new uint256[](3);
+
+        targets[0] = address(mock1);
+        targets[1] = address(mock2);
+        targets[2] = address(mock3);
+
+        dataArray[0] = abi.encodeWithSelector(
+            MockContract.setValue.selector,
+            100
+        );
+        dataArray[1] = abi.encodeWithSelector(
+            MockContract.setValue.selector,
+            200
+        );
+        dataArray[2] = abi.encodeWithSelector(
+            MockContract.setValue.selector,
+            300
+        );
+
+        ethAmounts[0] = 0.1 ether;
+        ethAmounts[1] = 0.2 ether;
+        ethAmounts[2] = 0.3 ether;
+
+        // Execute batch as agent
+        vm.startPrank(agents[0]);
+        uint256 fee = hiroWallet.batchExecute(targets, dataArray, ethAmounts);
+        vm.stopPrank();
+
+        // Verify results
+        assertEq(mock1.value(), 100, "Mock1 value not set correctly");
+        assertEq(mock2.value(), 200, "Mock2 value not set correctly");
+        assertEq(mock3.value(), 300, "Mock3 value not set correctly");
+
+        assertEq(address(mock1).balance, 0.1 ether, "Mock1 didn't receive ETH");
+        assertEq(address(mock2).balance, 0.2 ether, "Mock2 didn't receive ETH");
+        assertEq(address(mock3).balance, 0.3 ether, "Mock3 didn't receive ETH");
+
+        // Factory should have received fee
+        assertTrue(fee > 0, "Fee should be greater than 0");
+        assertTrue(
+            address(hiroFactory).balance >= fee,
+            "Factory didn't receive fee"
+        );
+    }
+
+    function testBatchExecuteFailsWithNonWhitelistedTarget() public {
+        // Deploy mock contracts
+        MockContract mock1 = new MockContract();
+        MockContract mock2 = new MockContract();
+
+        // Only add one mock to whitelist
+        vm.startPrank(user);
+        hiroFactory.addToWhitelist(address(mock1));
+        vm.stopPrank();
+
+        // Fund the wallet
+        vm.deal(address(hiroWallet), 10 ether);
+
+        // Prepare batch data
+        address[] memory targets = new address[](2);
+        bytes[] memory dataArray = new bytes[](2);
+        uint256[] memory ethAmounts = new uint256[](2);
+
+        targets[0] = address(mock1);
+        targets[1] = address(mock2); // Not whitelisted
+
+        dataArray[0] = abi.encodeWithSelector(
+            MockContract.setValue.selector,
+            100
+        );
+        dataArray[1] = abi.encodeWithSelector(
+            MockContract.setValue.selector,
+            200
+        );
+
+        ethAmounts[0] = 0.1 ether;
+        ethAmounts[1] = 0.2 ether;
+
+        // Should revert because mock2 is not whitelisted
+        vm.startPrank(agents[0]);
+        vm.expectRevert("Address not whitelisted");
+        hiroWallet.batchExecute(targets, dataArray, ethAmounts);
+        vm.stopPrank();
+    }
+
+    function testBatchExecuteInsufficientFunds() public {
+        // Deploy mock contracts
+        MockContract mock1 = new MockContract();
+
+        // Add to whitelist
+        vm.startPrank(user);
+        hiroFactory.addToWhitelist(address(mock1));
+        vm.stopPrank();
+
+        // Fund the wallet with small amount
+        vm.deal(address(hiroWallet), 0.05 ether);
+
+        // Prepare batch data
+        address[] memory targets = new address[](1);
+        bytes[] memory dataArray = new bytes[](1);
+        uint256[] memory ethAmounts = new uint256[](1);
+
+        targets[0] = address(mock1);
+        dataArray[0] = abi.encodeWithSelector(
+            MockContract.setValue.selector,
+            100
+        );
+        ethAmounts[0] = 0.1 ether; // More than available
+
+        // Should revert due to insufficient funds
+        vm.startPrank(agents[0]);
+        vm.expectRevert("Not enough ETH on wallet");
+        hiroWallet.batchExecute(targets, dataArray, ethAmounts);
+        vm.stopPrank();
+    }
+
+    function testBatchExecuteArrayLengthMismatch() public {
+        // Deploy mock contract
+        MockContract mock1 = new MockContract();
+
+        // Add to whitelist
+        vm.startPrank(user);
+        hiroFactory.addToWhitelist(address(mock1));
+        vm.stopPrank();
+
+        // Fund the wallet
+        vm.deal(address(hiroWallet), 1 ether);
+
+        // Prepare mismatched batch data
+        address[] memory targets = new address[](1);
+        bytes[] memory dataArray = new bytes[](2); // Mismatched length
+        uint256[] memory ethAmounts = new uint256[](1);
+
+        targets[0] = address(mock1);
+        dataArray[0] = abi.encodeWithSelector(
+            MockContract.setValue.selector,
+            100
+        );
+        dataArray[1] = abi.encodeWithSelector(
+            MockContract.setValue.selector,
+            200
+        );
+        ethAmounts[0] = 0.1 ether;
+
+        // Should revert due to array length mismatch
+        vm.startPrank(agents[0]);
+        vm.expectRevert("Array length mismatch");
+        hiroWallet.batchExecute(targets, dataArray, ethAmounts);
+        vm.stopPrank();
+    }
+
+    function testBatchExecuteGasSavings() public {
+        // Deploy mock contracts
+        MockContract mock1 = new MockContract();
+        MockContract mock2 = new MockContract();
+        MockContract mock3 = new MockContract();
+
+        // Add mocks to whitelist
+        vm.startPrank(user);
+        hiroFactory.addToWhitelist(address(mock1));
+        hiroFactory.addToWhitelist(address(mock2));
+        hiroFactory.addToWhitelist(address(mock3));
+        vm.stopPrank();
+
+        // Fund the wallet
+        vm.deal(address(hiroWallet), 10 ether);
+
+        // Prepare common data
+        bytes memory data = abi.encodeWithSelector(
+            MockContract.setValue.selector,
+            100
+        );
+
+        // Measure gas for individual calls
+        vm.startPrank(agents[0]);
+        uint256 gasStartIndividual = gasleft();
+
+        hiroWallet.execute(address(mock1), data, 0.1 ether);
+        hiroWallet.execute(address(mock2), data, 0.1 ether);
+        hiroWallet.execute(address(mock3), data, 0.1 ether);
+
+        uint256 gasUsedIndividual = gasStartIndividual - gasleft();
+
+        // Reset for batch test
+        vm.roll(block.number + 1);
+        vm.stopPrank();
+
+        // Prepare batch data
+        address[] memory targets = new address[](3);
+        bytes[] memory dataArray = new bytes[](3);
+        uint256[] memory ethAmounts = new uint256[](3);
+
+        targets[0] = address(mock1);
+        targets[1] = address(mock2);
+        targets[2] = address(mock3);
+
+        dataArray[0] = data;
+        dataArray[1] = data;
+        dataArray[2] = data;
+
+        ethAmounts[0] = 0.1 ether;
+        ethAmounts[1] = 0.1 ether;
+        ethAmounts[2] = 0.1 ether;
+
+        // Measure gas for batch call
+        vm.startPrank(agents[0]);
+        uint256 gasStartBatch = gasleft();
+
+        hiroWallet.batchExecute(targets, dataArray, ethAmounts);
+
+        uint256 gasUsedBatch = gasStartBatch - gasleft();
+        vm.stopPrank();
+
+        // Log gas usage for comparison
+        console.log("Gas used for individual calls:", gasUsedIndividual);
+        console.log("Gas used for batch call:", gasUsedBatch);
+        console.log("Gas savings:", gasUsedIndividual - gasUsedBatch);
+
+        // Batch should use less gas
+        assertTrue(
+            gasUsedBatch < gasUsedIndividual,
+            "Batch execution should use less gas"
         );
     }
 }
