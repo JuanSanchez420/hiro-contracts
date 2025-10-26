@@ -8,7 +8,6 @@ import "lib/openzeppelin-contracts/contracts/access/Ownable.sol";
 import "lib/openzeppelin-contracts/contracts/utils/ReentrancyGuard.sol";
 
 contract HiroFactory is Ownable, IHiroFactory, ReentrancyGuard {
-    event TransactionPriceSet(uint256 price);
     event HiroCreated(address indexed owner, address indexed wallet);
     event Whitelisted(address indexed addr);
     event RemovedFromWhitelist(address indexed addr);
@@ -18,18 +17,15 @@ contract HiroFactory is Ownable, IHiroFactory, ReentrancyGuard {
     mapping(address => bool) private whitelist;
     mapping(address => bool) private agents;
 
-    uint256 public override transactionPrice; // basis points
     uint256 public immutable override purchasePrice = 10_000_000_000_000_000; // 0.01 ETH
 
     receive() external payable {}
 
     constructor(
-        uint256 _transactionPrice,
         address factoryOwner,
         address[] memory _whitelist,
         address[] memory _agents
     ) {
-        transactionPrice = _transactionPrice;
         transferOwnership(factoryOwner);
 
         for (uint i = 0; i < _whitelist.length; i++) {
@@ -73,12 +69,6 @@ contract HiroFactory is Ownable, IHiroFactory, ReentrancyGuard {
 
     function sweepETH() external override onlyOwner {
         payable(msg.sender).transfer(address(this).balance);
-    }
-
-    function setTransactionPrice(uint256 _price) external override onlyOwner {
-        transactionPrice = _price;
-
-        emit TransactionPriceSet(_price);
     }
 
     function addToWhitelist(address addr) external override onlyOwner {

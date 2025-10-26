@@ -2,160 +2,98 @@
 pragma solidity =0.7.6;
 pragma abicoder v2;
 
-import {Test, console} from "forge-std/Test.sol";
-import {HiroWallet} from "../src/HiroWallet.sol";
+import {Test} from "forge-std/Test.sol";
 import {HiroFactory} from "../src/HiroFactory.sol";
-import "lib/openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
-import "lib/slipstream/contracts/periphery/interfaces/INonfungiblePositionManager.sol";
-import "lib/slipstream/contracts/core/libraries/TickMath.sol";
-import "lib/slipstream/contracts/core/interfaces/ICLFactory.sol";
 
-contract TestHiroFactory is Test {
+contract HiroFactoryTest is Test {
     HiroFactory public hiroFactory;
-    HiroWallet public hiroWallet;
-    uint256 public constant PURCHASE_PRICE = 10_000_000_000_000_000;
 
-    address public weth = vm.envAddress("WETH");
-    address public router = vm.envAddress("AERO_ROUTER");
+    address public constant USER = address(0x1234);
+    address public constant OTHER_USER = address(0x5678);
+    address public constant INITIAL_AGENT = address(0x9999);
+    address public constant INITIAL_WHITELIST = address(0x1111);
+
+    uint256 public constant PURCHASE_PRICE = 10_000_000_000_000_000;
 
     receive() external payable {}
 
     function setUp() public {
-        uint256 forkId = vm.createFork("http://localhost:8545");
-        vm.selectFork(forkId);
+        address[] memory whitelist = new address[](1);
+        whitelist[0] = INITIAL_WHITELIST;
 
-        string memory json = vm.readFile("./script/whitelist.json");
+        address[] memory agents = new address[](1);
+        agents[0] = INITIAL_AGENT;
 
-        address[] memory initialWhitelist = abi.decode(
-            vm.parseJson(json),
-            (address[])
-        );
+        hiroFactory = new HiroFactory(address(this), whitelist, agents);
 
-        // Build dynamic agents array by looking for AGENT_ADDRESS_1, AGENT_ADDRESS_2, etc.
-        uint256 maxAgents = 5; // adjust as needed
-        address[] memory agentsTemp = new address[](maxAgents);
-        uint256 count = 0;
-        for (uint256 i = 1; i <= maxAgents; i++) {
-            string memory key = string(
-                abi.encodePacked("AGENT_ADDRESS_", vm.toString(i))
-            );
-            // If the environment variable isn’t set, vm.envString returns an empty string.
-            string memory agentStr = vm.envString(key);
-            if (bytes(agentStr).length == 0) {
-                break;
-            }
-            agentsTemp[count] = vm.envAddress(key);
-            count++;
-        }
-        // Copy found addresses into a dynamic array of exact length.
-        address[] memory agents = new address[](count);
-        for (uint256 i = 0; i < count; i++) {
-            agents[i] = agentsTemp[i];
-        }
-
-        INonfungiblePositionManager positionManager = INonfungiblePositionManager(
-                vm.envAddress("AERO_NONFUNGIBLEPOSITIONMANAGER")
-            );
-
-        hiroFactory = new HiroFactory(
-            30_000,
-            msg.sender,
-            initialWhitelist,
-            agents
-        );
-        console.log("Hiro Factory deployed at:", address(hiroFactory));
-
-        hiroWallet = HiroWallet(
-            payable(
-                hiroFactory.createHiroWallet{
-                    value: hiroFactory.purchasePrice() * 2
-                }()
-            )
-        );
+        vm.deal(USER, 5 ether);
+        vm.deal(OTHER_USER, 5 ether);
+        vm.deal(address(this), 5 ether);
     }
 
-    function test_HiroFactory_details() public view {
+    function testPurchasePriceIsConstant() public view {
         assertEq(hiroFactory.purchasePrice(), PURCHASE_PRICE);
-        assertNotEq(address(hiroWallet), address(0));
     }
 
-    function test_duplicateWalletCreation() public {
+    function testConstructorSeedsWhitelistAndAgents() public view {
+        assertTrue(hiroFactory.isWhitelisted(INITIAL_WHITELIST));
+        assertTrue(hiroFactory.isAgent(INITIAL_AGENT));
+        assertFalse(hiroFactory.isAgent(OTHER_USER));
+    }
+
+    function testCreateWalletRecordsOwner() public {
+        address walletAddress = _createWallet(USER);
+        assertEq(hiroFactory.ownerToWallet(USER), walletAddress);
+        assertEq(hiroFactory.getWallet(USER), walletAddress);
+        assertTrue(walletAddress != address(0));
+    }
+
+    function testCreateWalletRequiresPurchasePrice() public {
+        vm.startPrank(USER);
+        vm.expectRevert("Insufficient funds");
+        hiroFactory.createHiroWallet{value: PURCHASE_PRICE - 1}();
+        vm.stopPrank();
+    }
+
+    function testPreventDuplicateWalletCreation() public {
+        vm.startPrank(USER);
+        hiroFactory.createHiroWallet{value: PURCHASE_PRICE}();
         vm.expectRevert("Subcontract already exists");
-        hiroFactory.createHiroWallet();
-    }
-
-    function test_setPrice() public {
-        vm.startPrank(msg.sender);
-        uint256 newPrice = 50 ether;
-        hiroFactory.setTransactionPrice(newPrice);
-        assertEq(hiroFactory.transactionPrice(), newPrice);
+        hiroFactory.createHiroWallet{value: PURCHASE_PRICE}();
         vm.stopPrank();
     }
 
-    function test_nonOwnerSetPrice() public {
-        address bob = address(0xBEEF);
-        vm.startPrank(bob);
-        vm.expectRevert();
-        hiroFactory.setTransactionPrice(10 ether);
-        vm.stopPrank();
+    function testWhitelistManagement() public {
+        address newTarget = address(0xBEEF);
+        hiroFactory.addToWhitelist(newTarget);
+        assertTrue(hiroFactory.isWhitelisted(newTarget));
+
+        hiroFactory.removeFromWhitelist(newTarget);
+        assertFalse(hiroFactory.isWhitelisted(newTarget));
     }
 
-    function test_addRemoveWhitelist() public {
-        vm.startPrank(msg.sender);
-        address newAddr = address(0x1234);
-        hiroFactory.addToWhitelist(newAddr);
-        bool whitelisted = hiroFactory.isWhitelisted(newAddr);
-        assertTrue(whitelisted);
+    function testAgentManagementRequiresOwnership() public {
+        address newAgent = address(0xAAAA);
+        hiroFactory.setAgent(newAgent, true);
+        assertTrue(hiroFactory.isAgent(newAgent));
 
-        hiroFactory.removeFromWhitelist(newAddr);
-        whitelisted = hiroFactory.isWhitelisted(newAddr);
-        assertFalse(whitelisted);
-        vm.stopPrank();
+        vm.prank(OTHER_USER);
+        vm.expectRevert("Ownable: caller is not the owner");
+        hiroFactory.setAgent(newAgent, false);
     }
 
-    function test_setAgentAndNonOwnerSetAgent() public {
-        vm.startPrank(msg.sender);
-        address agentAddr = address(0xABCD);
-        // Set agent from owner
-        hiroFactory.setAgent(agentAddr, true);
-        bool isAgent = hiroFactory.isAgent(agentAddr);
-        assertTrue(isAgent);
-        vm.stopPrank();
+    function testOwnerCanSweepEth() public {
+        (bool sent, ) = address(hiroFactory).call{value: 1 ether}("");
+        require(sent, "fund factory");
 
-        // Attempt to change agent from non-owner
-        address nonOwner = address(0xBEEF);
-        vm.startPrank(nonOwner);
-        vm.expectRevert();
-        hiroFactory.setAgent(agentAddr, false);
-        vm.stopPrank();
+        uint256 balanceBefore = address(this).balance;
+        hiroFactory.sweepETH();
+        assertEq(address(this).balance, balanceBefore + 1 ether);
     }
 
-    /*
-    function test_tokenSweep() public {
-        vm.startPrank(msg.sender);
-        // After createHiroWallet, factory received TOKEN_AMOUNT ETH.
-        uint256 factoryBalance = address(hiroFactory).balance;
-        // Capture owner's token balance before sweep.
-        uint256 ownerBalanceBefore = address(msg.sender).balance;
-        hiroFactory.sweep(address(hiro), factoryBalance);
-        uint256 ownerBalanceAfter = IERC20(hiro).balanceOf(msg.sender);
-        assertEq(ownerBalanceAfter, ownerBalanceBefore + factoryBalance);
+    function _createWallet(address walletOwner) internal returns (address walletAddress) {
+        vm.startPrank(walletOwner);
+        walletAddress = hiroFactory.createHiroWallet{value: PURCHASE_PRICE}();
         vm.stopPrank();
     }
-    */
-    /*
-
-    /* tested, works, but don't want public receive() on factory
-     function test_sweepETH() public {
-          // Send 1 ether to the factory contract.
-          (bool success, ) = address(hiroFactory).call{value: 1 ether}("");
-          require(success, "ETH transfer failed");
-
-          uint256 ownerBalanceBefore = address(this).balance;
-          hiroFactory.sweepETH();
-          uint256 ownerBalanceAfter = address(this).balance;
-          console.log(ownerBalanceBefore, ownerBalanceAfter);
-          assertEq(ownerBalanceAfter, ownerBalanceBefore + 1 ether);
-     }
-     */
 }

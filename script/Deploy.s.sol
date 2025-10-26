@@ -4,21 +4,17 @@ pragma abicoder v2;
 
 import {Script, console} from "lib/forge-std/src/Script.sol";
 import {HiroFactory} from "../src/HiroFactory.sol";
-import "lib/slipstream/contracts/periphery/interfaces/INonfungiblePositionManager.sol";
-import "lib/openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
-import "lib/slipstream/contracts/core/libraries/TickMath.sol";
-import "lib/slipstream/contracts/core/interfaces/ICLFactory.sol";
 
 contract Deploy is Script {
     HiroFactory public hiroFactory;
 
     address public weth = vm.envAddress("WETH");
-    address public router = vm.envAddress("AERO_ROUTER");
+    address public router = vm.envAddress("UNISWAP_SWAP_ROUTER");
 
     function setUp() public {}
 
     function run() public {
-        string memory json = vm.readFile("./script/whitelist.json");
+        string memory json = vm.readFile("./whitelist.json");
 
         address[] memory initialWhitelist = abi.decode(
             vm.parseJson(json),
@@ -49,12 +45,7 @@ contract Deploy is Script {
 
         vm.startBroadcast();
 
-        INonfungiblePositionManager positionManager = INonfungiblePositionManager(
-                vm.envAddress("AERO_NONFUNGIBLEPOSITIONMANAGER")
-            );
-
         hiroFactory = new HiroFactory(
-            30_000,
             msg.sender,
             initialWhitelist,
             agents

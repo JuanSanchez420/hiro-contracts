@@ -1,10 +1,11 @@
-contracts=lib/slipstream/contracts
 @ensdomains/=node_modules/@ensdomains/
 @solidity-parser/=node_modules/solhint/node_modules/@solidity-parser/
 ds-test/=lib/forge-std/lib/ds-test/src/
 forge-std/=lib/forge-std/src/
 hardhat/=node_modules/hardhat/
 @openzeppelin/=lib/openzeppelin-contracts/
-@nomad-xyz/=lib/ExcessivelySafeCall/
-@uniswap/=lib/solidity-lib/
-base64-sol/=lib/base64/
+@uniswap/v3-core/=lib/v3-core/
+@uniswap/v3-periphery/=lib/v3-periphery/
+v3-core/=lib/v3-core/
+v3-periphery/=lib/v3-periphery/contracts/
+openzeppelin-contracts/=lib/openzeppelin-contracts/contracts/
