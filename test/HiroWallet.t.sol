@@ -216,4 +216,27 @@ contract TestHiroWallet is Test {
         vm.expectRevert("Not enough ETH on wallet");
         hiroWallet.execute(targets, dataArray, values);
     }
+
+    function testOwnerCanWithdrawETH() public {
+        uint256 initialWalletBalance = address(hiroWallet).balance;
+        uint256 initialUserBalance = user.balance;
+
+        vm.prank(user);
+        hiroWallet.withdrawETH(0.5 ether);
+
+        assertEq(address(hiroWallet).balance, initialWalletBalance - 0.5 ether);
+        assertEq(user.balance, initialUserBalance + 0.5 ether);
+    }
+
+    function testNonOwnerCannotWithdrawETH() public {
+        vm.prank(nonAgent);
+        vm.expectRevert("Not the owner");
+        hiroWallet.withdrawETH(0.1 ether);
+    }
+
+    function testWithdrawETHRevertsOnInsufficientBalance() public {
+        vm.prank(user);
+        vm.expectRevert();
+        hiroWallet.withdrawETH(2 ether); // More than wallet balance
+    }
 }
