@@ -13,8 +13,6 @@ contract HiroFactoryTest is Test {
     address public constant INITIAL_AGENT = address(0x9999);
     address public constant INITIAL_WHITELIST = address(0x1111);
 
-    uint256 public constant PURCHASE_PRICE = 10_000_000_000_000_000;
-
     receive() external payable {}
 
     function setUp() public {
@@ -31,10 +29,6 @@ contract HiroFactoryTest is Test {
         vm.deal(address(this), 5 ether);
     }
 
-    function testPurchasePriceIsConstant() public view {
-        assertEq(hiroFactory.purchasePrice(), PURCHASE_PRICE);
-    }
-
     function testConstructorSeedsWhitelistAndAgents() public view {
         assertTrue(hiroFactory.isWhitelisted(INITIAL_WHITELIST));
         assertTrue(hiroFactory.isAgent(INITIAL_AGENT));
@@ -42,24 +36,35 @@ contract HiroFactoryTest is Test {
     }
 
     function testCreateWalletRecordsOwner() public {
-        address walletAddress = _createWallet(USER);
+        address walletAddress = _createWallet(USER, 0);
         assertEq(hiroFactory.ownerToWallet(USER), walletAddress);
         assertEq(hiroFactory.getWallet(USER), walletAddress);
         assertTrue(walletAddress != address(0));
     }
 
-    function testCreateWalletRequiresPurchasePrice() public {
+    function testCreateWalletForwardsAllValue() public {
+        uint256 deposit = 0.75 ether;
         vm.startPrank(USER);
-        vm.expectRevert("Insufficient funds");
-        hiroFactory.createHiroWallet{value: PURCHASE_PRICE - 1}();
+        address wallet = hiroFactory.createHiroWallet{value: deposit}();
         vm.stopPrank();
+
+        assertEq(address(wallet).balance, deposit);
+        assertEq(address(hiroFactory).balance, 0);
+    }
+
+    function testCreateWalletDoesNotRequirePayment() public {
+        vm.startPrank(USER);
+        address wallet = hiroFactory.createHiroWallet();
+        vm.stopPrank();
+
+        assertEq(wallet, hiroFactory.ownerToWallet(USER));
     }
 
     function testPreventDuplicateWalletCreation() public {
         vm.startPrank(USER);
-        hiroFactory.createHiroWallet{value: PURCHASE_PRICE}();
+        hiroFactory.createHiroWallet();
         vm.expectRevert("Subcontract already exists");
-        hiroFactory.createHiroWallet{value: PURCHASE_PRICE}();
+        hiroFactory.createHiroWallet();
         vm.stopPrank();
     }
 
@@ -91,9 +96,9 @@ contract HiroFactoryTest is Test {
         assertEq(address(this).balance, balanceBefore + 1 ether);
     }
 
-    function _createWallet(address walletOwner) internal returns (address walletAddress) {
+    function _createWallet(address walletOwner, uint256 value) internal returns (address walletAddress) {
         vm.startPrank(walletOwner);
-        walletAddress = hiroFactory.createHiroWallet{value: PURCHASE_PRICE}();
+        walletAddress = hiroFactory.createHiroWallet{value: value}();
         vm.stopPrank();
     }
 }

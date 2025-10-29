@@ -10,7 +10,7 @@ Run `forge build` for a full compile using the repository’s remappings. `forge
 Stick to Solidity 0.7.6 (the repo pins `pragma solidity =0.7.6;`) with 4-space indentation. Contracts, libraries, and scripts use PascalCase (`HiroFactory`, `Deploy`), while functions and variables are mixedCase and constants remain UPPER_SNAKE. Favor small libraries in `src/libraries/` when logic is shared. Always run `forge fmt` before committing; it enforces canonical spacing, import ordering, and doc-comment alignment.
 
 ## Contract Behavior Snapshot
-- `HiroFactory` charges a flat 0.01 ETH `purchasePrice`, deploys one `HiroWallet` per owner, and maintains global agent + whitelist registries. There are no per-operation fee schedules anymore.
+- `HiroFactory` deploys one `HiroWallet` per owner and maintains global agent + whitelist registries. Wallet creation no longer requires a setup fee, and there are still no per-operation charges.
 - `HiroWallet` exposes a single `execute(address[] targets, bytes[] data, uint256[] values)` function for agents. It validates array lengths, checks the factory whitelist for every target, confirms enough ETH is available, and then forwards each call. No gas-percentage or swap fees are assessed.
 - Wallet owners can withdraw arbitrary ERC20s and ETH that accumulate in their wallet; agents can never withdraw.
 

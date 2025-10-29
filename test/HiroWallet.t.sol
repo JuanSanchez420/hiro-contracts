@@ -81,11 +81,7 @@ contract TestHiroWallet is Test {
 
         vm.startPrank(user);
         hiroWallet = HiroWallet(
-            payable(
-                hiroFactory.createHiroWallet{
-                    value: hiroFactory.purchasePrice() + 1 ether
-                }()
-            )
+            payable(hiroFactory.createHiroWallet{value: 1 ether}())
         );
         vm.stopPrank();
     }

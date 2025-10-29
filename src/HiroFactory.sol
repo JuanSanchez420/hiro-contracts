@@ -17,8 +17,6 @@ contract HiroFactory is Ownable, IHiroFactory, ReentrancyGuard {
     mapping(address => bool) private whitelist;
     mapping(address => bool) private agents;
 
-    uint256 public immutable override purchasePrice = 10_000_000_000_000_000; // 0.01 ETH
-
     receive() external payable {}
 
     constructor(
@@ -49,11 +47,7 @@ contract HiroFactory is Ownable, IHiroFactory, ReentrancyGuard {
             "Subcontract already exists"
         );
 
-        require(msg.value >= purchasePrice, "Insufficient funds");
-
-        uint256 remaining = msg.value - purchasePrice;
-
-        HiroWallet wallet = new HiroWallet{value: remaining}(msg.sender);
+        HiroWallet wallet = new HiroWallet{value: msg.value}(msg.sender);
 
         ownerToWallet[msg.sender] = address(wallet);
 

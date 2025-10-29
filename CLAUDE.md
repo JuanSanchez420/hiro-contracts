@@ -58,7 +58,7 @@ Create a `.env` file in the project root with:
 
 ### Core Contracts
 - **HiroFactory** (`src/HiroFactory.sol`): Minimal factory that deploys `HiroWallet` instances
-  - Collects the flat 0.01 ETH purchase fee (`purchasePrice`) and forwards any extra ETH to the wallet
+  - Deploys wallets without charging a setup fee and forwards any attached ETH to the new wallet
   - Maintains the whitelist of callable contracts and an agent registry shared across all wallets
   - Enforces one wallet per EOAs via the `ownerToWallet` mapping
   - Owner can sweep stray ERC20s or ETH from the factory
@@ -73,7 +73,7 @@ Create a `.env` file in the project root with:
 ### Key Features & Architecture Details
 
 **Economic Model**
-- The only enforced payment is the 0.01 ETH wallet purchase fee.
+- Wallet creation is free; any ETH sent with the transaction is forwarded to the wallet.
 - Bundled executions do **not** skim tokens or charge gas-percentage fees—agents simply consume wallet balances.
 
 **Security & Access Control**
@@ -88,7 +88,7 @@ Create a `.env` file in the project root with:
 - **Vendored Deps**: The repo still vendors Uniswap/Aave sources for future work, but they are not referenced by the simplified contracts.
 
 ### Test Structure
-- `test/HiroFactory.t.sol`: Covers wallet creation, whitelist + agent management, purchase price enforcement, and owner sweep functionality.
+- `test/HiroFactory.t.sol`: Covers wallet creation behavior, whitelist + agent management, and owner sweep functionality.
 - `test/HiroWallet.t.sol`: Focuses on the bundled `execute` call (success, whitelist enforcement, array validation, ETH accounting) plus owner withdrawals.
 - Tests run against the default Anvil instance; no fork or environment variables are required for the current unit suites.
 - The deploy script (`script/Deploy.s.sol`) still reads whitelist/agent data from files + env vars to stay compatible with future network workflows.
