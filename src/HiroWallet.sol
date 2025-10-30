@@ -36,7 +36,9 @@ contract HiroWallet is ReentrancyGuard {
     }
 
     function withdrawETH(uint256 amount) external onlyOwner {
-        payable(msg.sender).transfer(amount);
+        require(amount <= address(this).balance, "Insufficient ETH balance");
+        (bool success, ) = payable(owner).call{value: amount}("");
+        require(success, "ETH transfer failed");
     }
 
     function execute(
