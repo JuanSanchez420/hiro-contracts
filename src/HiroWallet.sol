@@ -5,8 +5,11 @@ pragma abicoder v2;
 import "./interfaces/IHiroFactory.sol";
 import "lib/openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
 import "lib/openzeppelin-contracts/contracts/utils/ReentrancyGuard.sol";
+import "lib/openzeppelin-contracts/contracts/math/SafeMath.sol";
 
 contract HiroWallet is ReentrancyGuard {
+    using SafeMath for uint256;
+
     address public immutable owner;
     address public immutable factory;
 
@@ -30,12 +33,12 @@ contract HiroWallet is ReentrancyGuard {
     receive() external payable {}
 
     // Owner functions
-    function withdraw(address token, uint256 amount) external onlyOwner {
+    function withdraw(address token, uint256 amount) external onlyOwner nonReentrant {
         bool success = IERC20(token).transfer(msg.sender, amount);
         require(success, "Transfer failed");
     }
 
-    function withdrawETH(uint256 amount) external onlyOwner {
+    function withdrawETH(uint256 amount) external onlyOwner nonReentrant {
         require(amount <= address(this).balance, "Insufficient ETH balance");
         (bool success, ) = payable(owner).call{value: amount}("");
         require(success, "ETH transfer failed");
@@ -59,7 +62,7 @@ contract HiroWallet is ReentrancyGuard {
 
         uint256 totalEth;
         for (uint256 i = 0; i < length; i++) {
-            totalEth += ethAmounts[i];
+            totalEth = totalEth.add(ethAmounts[i]);
         }
         require(totalEth <= address(this).balance, "Not enough ETH on wallet");
 
