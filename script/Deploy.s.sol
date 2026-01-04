@@ -8,9 +8,6 @@ import {HiroFactory} from "../src/HiroFactory.sol";
 contract Deploy is Script {
     HiroFactory public hiroFactory;
 
-    address public weth = vm.envAddress("WETH");
-    address public router = vm.envAddress("UNISWAP_SWAP_ROUTER");
-
     function setUp() public {}
 
     function run() public {

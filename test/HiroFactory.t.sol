@@ -88,8 +88,9 @@ contract HiroFactoryTest is Test {
     }
 
     function testOwnerCanSweepEth() public {
-        (bool sent, ) = address(hiroFactory).call{value: 1 ether}("");
-        require(sent, "fund factory");
+        // Factory no longer has receive(), so use vm.deal to simulate
+        // ETH arriving via selfdestruct or other forced mechanisms
+        vm.deal(address(hiroFactory), 1 ether);
 
         uint256 balanceBefore = address(this).balance;
         hiroFactory.sweepETH();

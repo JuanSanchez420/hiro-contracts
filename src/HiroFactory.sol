@@ -5,9 +5,8 @@ pragma abicoder v2;
 import "./HiroWallet.sol";
 import "./interfaces/IHiroFactory.sol";
 import "lib/openzeppelin-contracts/contracts/access/Ownable.sol";
-import "lib/openzeppelin-contracts/contracts/utils/ReentrancyGuard.sol";
 
-contract HiroFactory is Ownable, IHiroFactory, ReentrancyGuard {
+contract HiroFactory is Ownable, IHiroFactory {
     event HiroCreated(address indexed owner, address indexed wallet);
     event Whitelisted(address indexed addr);
     event RemovedFromWhitelist(address indexed addr);
@@ -16,8 +15,6 @@ contract HiroFactory is Ownable, IHiroFactory, ReentrancyGuard {
 
     mapping(address => bool) private whitelist;
     mapping(address => bool) private agents;
-
-    receive() external payable {}
 
     constructor(
         address factoryOwner,
@@ -39,7 +36,6 @@ contract HiroFactory is Ownable, IHiroFactory, ReentrancyGuard {
         external
         payable
         override
-        nonReentrant
         returns (address payable)
     {
         require(
@@ -62,7 +58,8 @@ contract HiroFactory is Ownable, IHiroFactory, ReentrancyGuard {
     }
 
     function sweepETH() external override onlyOwner {
-        payable(msg.sender).transfer(address(this).balance);
+        (bool success, ) = payable(msg.sender).call{value: address(this).balance}("");
+        require(success, "ETH transfer failed");
     }
 
     function addToWhitelist(address addr) external override onlyOwner {

@@ -25,7 +25,7 @@ contract HiroWallet is ReentrancyGuard {
 
     event Executed(address indexed target, address indexed caller, uint256 value);
 
-    constructor(address _owner) payable nonReentrant() {
+    constructor(address _owner) payable {
         owner = _owner;
         factory = msg.sender;
     }
