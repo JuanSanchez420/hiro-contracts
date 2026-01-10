@@ -1,6 +1,6 @@
 ANVIL_URL ?= http://127.0.0.1:8545
 BASE_RPC  ?= https://rpc.ankr.com/base/3ec8a99c8d8a9f1d4b41cbbd6849bd882e7af57f597634fd1f39c6cb5986656f
-CHAIN_ID ?= 31338
+CHAIN_ID ?= 31337
 SENDER  ?= 0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266
 
 # Foundry’s default 10 accounts (HD index 0..9)
