@@ -2,14 +2,14 @@
 pragma solidity =0.7.6;
 
 abstract contract IHiroFactory {
-    function ownerToWallet(address) virtual external view returns (address);
-    function createHiroWallet() virtual external payable returns (address payable);
-    function getWallet(address owner) virtual external view returns (address);
-    function sweep(address token, uint256 amount) virtual external;
-    function sweepETH() virtual external;
-    function isWhitelisted(address addr) virtual external view returns (bool);
-    function addToWhitelist(address addr) virtual external;
-    function removeFromWhitelist(address addr) virtual external;
-    function isAgent(address addr) virtual external view returns (bool);
-    function setAgent(address addr, bool b) virtual external;
+    function ownerToWallet(address) external view virtual returns (address);
+    function createHiroWallet() external payable virtual returns (address payable);
+    function getWallet(address owner) external view virtual returns (address);
+    function sweep(address token, uint256 amount) external virtual;
+    function sweepETH() external virtual;
+    function isWhitelisted(address addr) external view virtual returns (bool);
+    function addToWhitelist(address addr) external virtual;
+    function removeFromWhitelist(address addr) external virtual;
+    function isAgent(address addr) external view virtual returns (bool);
+    function setAgent(address addr, bool b) external virtual;
 }

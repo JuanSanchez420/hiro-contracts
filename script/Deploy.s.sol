@@ -13,19 +13,14 @@ contract Deploy is Script {
     function run() public {
         string memory json = vm.readFile("./whitelist.json");
 
-        address[] memory initialWhitelist = abi.decode(
-            vm.parseJson(json),
-            (address[])
-        );
+        address[] memory initialWhitelist = abi.decode(vm.parseJson(json), (address[]));
 
         // Build dynamic agents array by looking for AGENT_ADDRESS_1, AGENT_ADDRESS_2, etc.
         uint256 maxAgents = 5; // adjust as needed
         address[] memory agentsTemp = new address[](maxAgents);
         uint256 count = 0;
         for (uint256 i = 1; i <= maxAgents; i++) {
-            string memory key = string(
-                abi.encodePacked("AGENT_ADDRESS_", vm.toString(i))
-            );
+            string memory key = string(abi.encodePacked("AGENT_ADDRESS_", vm.toString(i)));
             // If the environment variable isn’t set, vm.envString returns an empty string.
             string memory agentStr = vm.envString(key);
             if (bytes(agentStr).length == 0) {
@@ -42,11 +37,7 @@ contract Deploy is Script {
 
         vm.startBroadcast();
 
-        hiroFactory = new HiroFactory(
-            msg.sender,
-            initialWhitelist,
-            agents
-        );
+        hiroFactory = new HiroFactory(msg.sender, initialWhitelist, agents);
         console.log("Hiro Factory deployed at:", address(hiroFactory));
 
         vm.stopBroadcast();
