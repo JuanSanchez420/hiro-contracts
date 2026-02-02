@@ -14,6 +14,7 @@ contract HiroFactory is Ownable, IHiroFactory {
     event HiroCreated(address indexed owner, address indexed wallet);
     event Whitelisted(address indexed addr);
     event RemovedFromWhitelist(address indexed addr);
+    event AgentUpdated(address indexed addr, bool isAgent);
 
     mapping(address => address) public override ownerToWallet;
 
@@ -83,5 +84,6 @@ contract HiroFactory is Ownable, IHiroFactory {
 
     function setAgent(address addr, bool b) external override onlyOwner {
         agents[addr] = b;
+        emit AgentUpdated(addr, b);
     }
 }

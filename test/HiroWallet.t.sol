@@ -605,4 +605,125 @@ contract TestHiroWallet is Test {
         vm.expectRevert("Not the owner");
         hiroWallet.withdrawETH(0.1 ether);
     }
+
+    // ==================== EDGE CASE TESTS ====================
+
+    function testWithdrawZeroTokens() public {
+        mockToken.mint(address(hiroWallet), 1 ether);
+
+        uint256 balanceBefore = mockToken.balanceOf(user);
+        vm.prank(user);
+        hiroWallet.withdraw(address(mockToken), 0);
+
+        // Should succeed with no change
+        assertEq(mockToken.balanceOf(user), balanceBefore);
+        assertEq(mockToken.balanceOf(address(hiroWallet)), 1 ether);
+    }
+
+    function testWithdrawZeroETH() public {
+        uint256 initialWalletBalance = address(hiroWallet).balance;
+        uint256 initialUserBalance = user.balance;
+
+        vm.prank(user);
+        hiroWallet.withdrawETH(0);
+
+        // Should succeed with no change
+        assertEq(address(hiroWallet).balance, initialWalletBalance);
+        assertEq(user.balance, initialUserBalance);
+    }
+
+    function testExecuteWithZeroValueTransfer() public {
+        MockContract mock = new MockContract();
+        vm.prank(user);
+        hiroFactory.addToWhitelist(address(mock));
+
+        address[] memory targets = new address[](1);
+        targets[0] = address(mock);
+        bytes[] memory dataArray = new bytes[](1);
+        dataArray[0] = abi.encodeWithSelector(MockContract.setValue.selector, 100);
+        uint256[] memory values = new uint256[](1);
+        values[0] = 0; // Zero ETH
+
+        vm.prank(agent);
+        hiroWallet.execute(targets, dataArray, values);
+
+        assertEq(mock.value(), 100);
+        assertEq(mock.lastReceivedValue(), 0);
+    }
+
+    function testBatchExecutionFirstCallSucceedsSecondFails() public {
+        MockContract mock1 = new MockContract();
+        MockContract mock2 = new MockContract();
+
+        vm.startPrank(user);
+        hiroFactory.addToWhitelist(address(mock1));
+        hiroFactory.addToWhitelist(address(mock2));
+        vm.stopPrank();
+
+        // Create a scenario where second call reverts
+        // We'll try to send more ETH than available for second call
+        vm.deal(address(hiroWallet), 0.5 ether);
+
+        address[] memory targets = new address[](2);
+        targets[0] = address(mock1);
+        targets[1] = address(mock2);
+        bytes[] memory dataArray = new bytes[](2);
+        dataArray[0] = abi.encodeWithSelector(MockContract.setValue.selector, 10);
+        dataArray[1] = abi.encodeWithSelector(MockContract.setValue.selector, 20);
+        uint256[] memory values = new uint256[](2);
+        values[0] = 0.3 ether;
+        values[1] = 0.3 ether; // Total 0.6 ETH > 0.5 ETH available
+
+        vm.prank(agent);
+        vm.expectRevert("Not enough ETH on wallet");
+        hiroWallet.execute(targets, dataArray, values);
+
+        // First call should NOT have persisted due to atomic revert
+        assertEq(mock1.value(), 0);
+    }
+
+    function testExecuteEmptyCalldata() public {
+        MockContract mock = new MockContract();
+        vm.prank(user);
+        hiroFactory.addToWhitelist(address(mock));
+
+        vm.deal(address(hiroWallet), 1 ether);
+
+        address[] memory targets = new address[](1);
+        targets[0] = address(mock);
+        bytes[] memory dataArray = new bytes[](1);
+        dataArray[0] = ""; // Empty calldata - just send ETH
+        uint256[] memory values = new uint256[](1);
+        values[0] = 0.25 ether;
+
+        vm.prank(agent);
+        hiroWallet.execute(targets, dataArray, values);
+
+        assertEq(mock.lastReceivedValue(), 0.25 ether);
+    }
+
+    function testMultipleWithdrawals() public {
+        mockToken.mint(address(hiroWallet), 1 ether);
+        vm.deal(address(hiroWallet), 1 ether);
+
+        vm.startPrank(user);
+
+        // Multiple token withdrawals
+        hiroWallet.withdraw(address(mockToken), 0.3 ether);
+        hiroWallet.withdraw(address(mockToken), 0.3 ether);
+        hiroWallet.withdraw(address(mockToken), 0.4 ether);
+
+        assertEq(mockToken.balanceOf(user), 1 ether);
+        assertEq(mockToken.balanceOf(address(hiroWallet)), 0);
+
+        // Multiple ETH withdrawals
+        uint256 initialBalance = user.balance;
+        hiroWallet.withdrawETH(0.5 ether);
+        hiroWallet.withdrawETH(0.5 ether);
+
+        assertEq(user.balance, initialBalance + 1 ether);
+        assertEq(address(hiroWallet).balance, 0);
+
+        vm.stopPrank();
+    }
 }
