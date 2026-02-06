@@ -74,6 +74,8 @@ contract HiroSeason is Ownable, ReentrancyGuard {
     uint256 public constant SEASON_DURATION = 30 days;
     uint24 public constant POOL_FEE = 3000; // 0.3%
     int24 public constant TICK_SPACING = 60;
+    uint256 public constant REDEMPTION_GRACE_PERIOD = 3 days;
+    uint32 public constant TWAP_INTERVAL = 300; // 5 minutes
 
     // ═══════════════════════════════════════════════════════════════════════════
     // STATE
@@ -158,6 +160,8 @@ contract HiroSeason is Ownable, ReentrancyGuard {
         (address token0, address token1, uint160 sqrtPriceX96) = _getPoolParams();
 
         pool = positionManager.createAndInitializePoolIfNecessary(token0, token1, POOL_FEE, sqrtPriceX96);
+
+        IUniswapV3Pool(pool).increaseObservationCardinalityNext(10);
 
         // Deploy liquidity
         _deployLiquidity(token0, token1, sqrtPriceX96);
@@ -278,9 +282,20 @@ contract HiroSeason is Ownable, ReentrancyGuard {
         (sqrtPriceX96,,,,,,) = IUniswapV3Pool(pool).slot0();
     }
 
-    /// @notice Calculate expected HIRO output for WETH input at current price
+    /// @notice Get 5-minute TWAP sqrt price from pool observations
+    function _getTWAPSqrtPrice() internal view returns (uint160) {
+        uint32[] memory secondsAgos = new uint32[](2);
+        secondsAgos[0] = TWAP_INTERVAL;
+        secondsAgos[1] = 0;
+        (int56[] memory tickCumulatives,) = IUniswapV3Pool(pool).observe(secondsAgos);
+        int56 tickDelta = tickCumulatives[1] - tickCumulatives[0];
+        int24 avgTick = int24(tickDelta / int56(uint56(TWAP_INTERVAL)));
+        return TickMath.getSqrtRatioAtTick(avgTick);
+    }
+
+    /// @notice Calculate expected HIRO output for WETH input at TWAP price
     function _calculateExpectedHiro(uint256 wethAmount) internal view returns (uint256) {
-        uint160 sqrtPriceX96 = _getCurrentSqrtPrice();
+        uint160 sqrtPriceX96 = _getTWAPSqrtPrice();
 
         // sqrtPriceX96 = sqrt(token1/token0) * 2^96
         // We need to calculate HIRO out for WETH in
@@ -302,7 +317,7 @@ contract HiroSeason is Ownable, ReentrancyGuard {
 
     /// @notice Calculate price limit for buyback based on priceImpactBps
     function _calculatePriceLimit() internal view returns (uint160) {
-        uint160 currentSqrtPrice = _getCurrentSqrtPrice();
+        uint160 currentSqrtPrice = _getTWAPSqrtPrice();
 
         // For WETH->HIRO:
         // - hiroIsToken0 (zeroForOne=false): price goes UP, limit > current
@@ -371,6 +386,12 @@ contract HiroSeason is Ownable, ReentrancyGuard {
     /// @dev Anyone can call in ENDED state. Pass 0 for minWethOut if no slippage protection needed.
     function openRedemption(uint256 minWethOut) external nonReentrant {
         require(state == SeasonState.ENDED, "Not in ENDED state");
+        if (msg.sender != owner()) {
+            require(
+                block.timestamp >= seasonStartTime + SEASON_DURATION + REDEMPTION_GRACE_PERIOD,
+                "Grace period not over"
+            );
+        }
 
         _withdrawLiquidity(minWethOut);
         _collect();

@@ -8,6 +8,7 @@ import {HiroSeason} from "../src/HiroSeason.sol";
 import {HiroToken} from "../src/HiroToken.sol";
 import "lib/v3-periphery/contracts/interfaces/external/IWETH9.sol";
 import "lib/v3-periphery/contracts/interfaces/INonfungiblePositionManager.sol";
+import "lib/v3-core/contracts/interfaces/IUniswapV3Pool.sol";
 
 // SwapRouter02 interface (different from ISwapRouter - no deadline in struct)
 interface ISwapRouter02 {
@@ -905,21 +906,83 @@ contract HiroSeasonTest is Test {
     // OPEN REDEMPTION PERMISSIONLESS TEST
     // ═══════════════════════════════════════════════════════════════════════════
 
-    function testAnyoneCanOpenRedemption() public {
+    function testAnyoneCanOpenRedemptionAfterGracePeriod() public {
         season.fundRedemption{value: 10 ether}();
         season.createPoolAndDeployLiquidity();
         season.startSeason();
 
-        // End the season
-        vm.warp(block.timestamp + 30 days + 1);
+        // End the season and warp past grace period
+        vm.warp(block.timestamp + 30 days + 3 days + 1);
         season.endSeason();
 
-        // Any user can open redemption immediately
+        // Any user can open redemption after grace period
         vm.prank(users[0]);
         season.openRedemption(0);
 
         assertEq(uint256(season.state()), uint256(HiroSeason.SeasonState.REDEEMABLE));
         assertTrue(season.totalRedemptionWETH() > 0);
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // GRACE PERIOD TESTS (M-1)
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    function testOwnerCanOpenRedemptionImmediatelyAfterEnded() public {
+        season.fundRedemption{value: 10 ether}();
+        season.createPoolAndDeployLiquidity();
+        season.startSeason();
+
+        // End the season (warp exactly to end)
+        vm.warp(block.timestamp + 30 days + 1);
+        season.endSeason();
+
+        // Owner can call immediately — no grace period wait
+        season.openRedemption(0);
+        assertEq(uint256(season.state()), uint256(HiroSeason.SeasonState.REDEEMABLE));
+    }
+
+    function testNonOwnerRevertsBeforeGracePeriod() public {
+        season.fundRedemption{value: 10 ether}();
+        season.createPoolAndDeployLiquidity();
+        season.startSeason();
+
+        vm.warp(block.timestamp + 30 days + 1);
+        season.endSeason();
+
+        // Non-owner reverts during grace period
+        vm.prank(users[0]);
+        vm.expectRevert("Grace period not over");
+        season.openRedemption(0);
+    }
+
+    function testNonOwnerSucceedsAfterGracePeriod() public {
+        season.fundRedemption{value: 10 ether}();
+        season.createPoolAndDeployLiquidity();
+        season.startSeason();
+
+        uint256 startTime = block.timestamp;
+
+        vm.warp(startTime + 30 days + 1);
+        season.endSeason();
+
+        // Warp to exactly after grace period
+        vm.warp(startTime + 30 days + 3 days);
+        vm.prank(users[0]);
+        season.openRedemption(0);
+
+        assertEq(uint256(season.state()), uint256(HiroSeason.SeasonState.REDEEMABLE));
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // TWAP / OBSERVATION CARDINALITY TESTS (M-2)
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    function testObservationCardinalityIncreasedAfterPoolCreation() public {
+        season.createPoolAndDeployLiquidity();
+
+        address poolAddr = season.pool();
+        (,,,, uint16 observationCardinalityNext,,) = IUniswapV3Pool(poolAddr).slot0();
+        assertTrue(observationCardinalityNext >= 10, "Observation cardinality next should be >= 10");
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
