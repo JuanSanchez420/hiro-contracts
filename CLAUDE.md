@@ -6,7 +6,7 @@ Foundry-based Solidity project using **Solidity 0.7.6** on Base L2.
 
 ```bash
 forge build                          # Compile
-forge test                           # Run all tests (84 tests)
+forge test                           # Run all tests (88 tests)
 forge test --match-test testName     # Run specific test
 forge test -vvv                      # Verbose output
 forge fmt                            # Format code
