@@ -179,8 +179,6 @@ contract SimulateSeason is Script {
     }
 
     function _simulateRedemptions() internal {
-        uint256 totalRedemptionWETH = season.totalRedemptionWETH();
-        uint256 totalRedeemableHiro = season.totalRedeemableHiro();
         uint256 totalRedeemed = 0;
         uint256 totalETHReceived = 0;
 

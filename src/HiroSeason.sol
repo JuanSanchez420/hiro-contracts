@@ -164,7 +164,7 @@ contract HiroSeason is Ownable, ReentrancyGuard {
         IUniswapV3Pool(pool).increaseObservationCardinalityNext(10);
 
         // Deploy liquidity
-        _deployLiquidity(token0, token1, sqrtPriceX96);
+        _deployLiquidity(token0, token1);
     }
 
     function _getPoolParams() internal view returns (address token0, address token1, uint160 sqrtPriceX96) {
@@ -190,8 +190,8 @@ contract HiroSeason is Ownable, ReentrancyGuard {
         }
     }
 
-    function _deployLiquidity(address token0, address token1, uint160 sqrtPriceX96) internal {
-        (int24 tickLower, int24 tickUpper) = _calculateTicks(sqrtPriceX96);
+    function _deployLiquidity(address token0, address token1) internal {
+        (int24 tickLower, int24 tickUpper) = _calculateTicks();
 
         hiroToken.approve(address(positionManager), TOTAL_SUPPLY);
 
@@ -216,7 +216,7 @@ contract HiroSeason is Ownable, ReentrancyGuard {
         emit PoolCreated(pool, tokenId);
     }
 
-    function _calculateTicks(uint160) internal view returns (int24 tickLower, int24 tickUpper) {
+    function _calculateTicks() internal view returns (int24 tickLower, int24 tickUpper) {
         // Place liquidity ABOVE current tick for single-sided HIRO deposit
         // Current tick will be ~ -100000
         // Liquidity range: -99960 to 0 (just above current tick)

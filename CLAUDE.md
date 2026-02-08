@@ -30,8 +30,22 @@ Non-ruggable: Owner cannot extract ETH, HIRO, or LP NFT.
 
 ## Deployment
 
+Requires `whitelist.json` and env vars: `AGENT_ADDRESS_1` through `AGENT_ADDRESS_5`.
+
+### Local Development
+
 ```bash
-forge script script/Deploy.s.sol --rpc-url <rpc_url> --broadcast
+make fork                            # Start Anvil with Base fork
+make deploy                          # Deploy HiroFactory to Anvil (unlocked accounts)
 ```
 
-Requires `whitelist.json` and env vars: `WETH`, `UNISWAP_SWAP_ROUTER`, `AGENT_ADDRESS_1` through `AGENT_ADDRESS_5`.
+### Production (Base Mainnet)
+
+Import a deployer key first, then deploy. Requires `BASESCAN_API_KEY` env var for verification.
+
+```bash
+make import-key                      # Import key as "deployer" (default)
+make import-key ACCOUNT=mykey        # Import key with custom name
+make deploy-base                     # Deploy HiroFactory to Base
+make deploy-season                   # Deploy HiroSeason to Base
+```

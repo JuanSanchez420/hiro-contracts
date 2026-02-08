@@ -434,7 +434,6 @@ contract HiroSeasonTest is Test {
         season.endSeason();
         season.openRedemption(0);
 
-        uint256 totalRedemptionETH = season.totalRedemptionWETH();
         uint256 totalHiro = season.totalRedeemableHiro();
 
         // Redeem all users and track total ETH received
@@ -583,9 +582,7 @@ contract HiroSeasonTest is Test {
         uint256 availableForBuyback = season.availableForBuyback();
 
         if (availableForBuyback > 0) {
-            uint256 hiroBefore = hiroToken.balanceOf(address(season));
             try season.executeBuyback() {
-                uint256 hiroAfter = hiroToken.balanceOf(address(season));
                 console.log(_concat("Buyback: ", _concat(_formatEth(availableForBuyback), " ETH")));
             } catch {
                 console.log("Buyback failed");
@@ -671,7 +668,7 @@ contract HiroSeasonTest is Test {
     function _buildRedemptionLog(
         uint256 userId,
         uint256 ethSpent,
-        uint256 hiroHeld,
+        uint256,
         uint256 ethReceived,
         int256 profitLoss
     ) internal pure returns (string memory) {
