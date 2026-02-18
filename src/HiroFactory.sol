@@ -21,9 +21,7 @@ contract HiroFactory is Ownable, IHiroFactory {
     mapping(address => bool) private whitelist;
     mapping(address => bool) private agents;
 
-    constructor(address factoryOwner, address[] memory _whitelist, address[] memory _agents) {
-        transferOwnership(factoryOwner);
-
+    constructor(address[] memory _whitelist, address[] memory _agents) {
         for (uint256 i = 0; i < _whitelist.length; i++) {
             whitelist[_whitelist[i]] = true;
         }

@@ -76,7 +76,8 @@ contract TestHiroWallet is Test {
         address[] memory agents = new address[](1);
         agents[0] = agent;
 
-        hiroFactory = new HiroFactory(user, whitelist, agents);
+        vm.prank(user);
+        hiroFactory = new HiroFactory(whitelist, agents);
         mockToken = new MockERC20();
 
         vm.startPrank(user);

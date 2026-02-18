@@ -23,7 +23,7 @@ contract HiroFactoryTest is Test {
         address[] memory agents = new address[](1);
         agents[0] = INITIAL_AGENT;
 
-        hiroFactory = new HiroFactory(address(this), whitelist, agents);
+        hiroFactory = new HiroFactory(whitelist, agents);
 
         vm.deal(USER, 5 ether);
         vm.deal(OTHER_USER, 5 ether);

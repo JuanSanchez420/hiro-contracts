@@ -2,10 +2,11 @@
 pragma solidity =0.7.6;
 pragma abicoder v2;
 
-import {Script, console} from "lib/forge-std/src/Script.sol";
+import {console} from "lib/forge-std/src/Script.sol";
 import {HiroFactory} from "../src/HiroFactory.sol";
+import {SafeScript} from "./SafeScript.sol";
 
-contract Deploy is Script {
+contract Deploy is SafeScript {
     HiroFactory public hiroFactory;
 
     function setUp() public {}
@@ -16,7 +17,7 @@ contract Deploy is Script {
         address[] memory initialWhitelist = abi.decode(vm.parseJson(json), (address[]));
 
         // Build dynamic agents array by looking for AGENT_ADDRESS_1, AGENT_ADDRESS_2, etc.
-        uint256 maxAgents = 5; // adjust as needed
+        uint256 maxAgents = 2; // adjust as needed
         address[] memory agentsTemp = new address[](maxAgents);
         uint256 count = 0;
         for (uint256 i = 1; i <= maxAgents; i++) {
@@ -34,10 +35,12 @@ contract Deploy is Script {
         for (uint256 i = 0; i < count; i++) {
             agents[i] = agentsTemp[i];
         }
+        require(count > 0, "No agents configured - check AGENT_ADDRESS env vars");
 
+        _rejectDefaultSender();
         vm.startBroadcast();
 
-        hiroFactory = new HiroFactory(msg.sender, initialWhitelist, agents);
+        hiroFactory = new HiroFactory(initialWhitelist, agents);
         console.log("Hiro Factory deployed at:", address(hiroFactory));
 
         vm.stopBroadcast();
