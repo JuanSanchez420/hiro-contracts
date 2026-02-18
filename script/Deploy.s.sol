@@ -2,11 +2,10 @@
 pragma solidity =0.7.6;
 pragma abicoder v2;
 
-import {console} from "lib/forge-std/src/Script.sol";
+import {Script, console} from "lib/forge-std/src/Script.sol";
 import {HiroFactory} from "../src/HiroFactory.sol";
-import {SafeScript} from "./SafeScript.sol";
 
-contract Deploy is SafeScript {
+contract Deploy is Script {
     HiroFactory public hiroFactory;
 
     function setUp() public {}
@@ -37,7 +36,6 @@ contract Deploy is SafeScript {
         }
         require(count > 0, "No agents configured - check AGENT_ADDRESS env vars");
 
-        _rejectDefaultSender();
         vm.startBroadcast();
 
         hiroFactory = new HiroFactory(initialWhitelist, agents);

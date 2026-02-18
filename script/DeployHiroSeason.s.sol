@@ -2,11 +2,10 @@
 pragma solidity =0.7.6;
 pragma abicoder v2;
 
-import {console} from "lib/forge-std/src/Script.sol";
+import {Script, console} from "lib/forge-std/src/Script.sol";
 import {HiroSeason} from "../src/HiroSeason.sol";
-import {SafeScript} from "./SafeScript.sol";
 
-contract DeployHiroSeason is SafeScript {
+contract DeployHiroSeason is Script {
     // Base mainnet addresses
     address constant WETH = 0x4200000000000000000000000000000000000006;
     address constant POSITION_MANAGER = 0x03a520b32C04BF3bEEf7BEb72E919cf822Ed34f1;
@@ -17,7 +16,6 @@ contract DeployHiroSeason is SafeScript {
     function setUp() public {}
 
     function run() public {
-        _rejectDefaultSender();
         vm.startBroadcast();
 
         hiroSeason = new HiroSeason(WETH, POSITION_MANAGER, SWAP_ROUTER);
