@@ -26,6 +26,10 @@ interface ISwapRouter02 {
 }
 
 contract HiroSeasonTest is Test {
+    // Events (redeclare for vm.expectEmit in Solidity 0.7.6)
+    event BuybackExecuted(uint256 ethSpent, uint256 hiroReceived);
+    event BuybackSettingsUpdated(uint256 slippageBps, uint256 priceImpactBps);
+
     // Base mainnet addresses
     address constant WETH = 0x4200000000000000000000000000000000000006;
     address constant POSITION_MANAGER = 0x03a520b32C04BF3bEEf7BEb72E919cf822Ed34f1;
@@ -980,6 +984,328 @@ contract HiroSeasonTest is Test {
         address poolAddr = season.pool();
         (,,,, uint16 observationCardinalityNext,,) = IUniswapV3Pool(poolAddr).slot0();
         assertTrue(observationCardinalityNext >= 10, "Observation cardinality next should be >= 10");
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // FUZZ TESTS
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    function testFuzz_redemptionNeverExceedsPool(uint256 hiroAmount) public {
+        season.fundRedemption{value: 10 ether}();
+        season.createPoolAndDeployLiquidity();
+        season.startSeason();
+
+        // Bootstrap trading so there's circulating HIRO
+        address bootstrapper = makeAddr("fuzzBootstrapper");
+        vm.deal(bootstrapper, 10 ether);
+        vm.startPrank(bootstrapper);
+        weth.deposit{value: 5 ether}();
+        weth.approve(address(swapRouter), 5 ether);
+        ISwapRouter02.ExactInputSingleParams memory params = ISwapRouter02.ExactInputSingleParams({
+            tokenIn: address(weth),
+            tokenOut: address(hiroToken),
+            fee: 3000,
+            recipient: bootstrapper,
+            amountIn: 5 ether,
+            amountOutMinimum: 0,
+            sqrtPriceLimitX96: 0
+        });
+        swapRouter.exactInputSingle(params);
+        vm.stopPrank();
+
+        vm.warp(block.timestamp + 30 days + 1);
+        season.endSeason();
+        season.openRedemption(0);
+
+        uint256 totalHiro = season.totalRedeemableHiro();
+        uint256 totalETH = season.totalRedemptionWETH();
+
+        hiroAmount = bound(hiroAmount, 1, totalHiro);
+
+        uint256 amountOwed = season.calculateRedemption(hiroAmount);
+        assertTrue(amountOwed <= totalETH, "Redemption exceeds pool");
+        // Very small hiroAmount may round to 0 — that's expected and handled by "Amount too small" revert
+        if (hiroAmount > totalHiro / totalETH) {
+            assertTrue(amountOwed > 0, "Redemption should be > 0 for non-dust amounts");
+        }
+    }
+
+    function testFuzz_fundRedemption(uint256 amount) public {
+        amount = bound(amount, 1, 1000 ether);
+
+        season.fundRedemption{value: amount}();
+        assertEq(season.redemptionPool(), amount);
+
+        // Fund again to verify accumulation
+        uint256 second = bound(amount, 1, 500 ether);
+        season.fundRedemption{value: second}();
+        assertEq(season.redemptionPool(), amount + second);
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // BUYBACK SUCCESS PATH
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    function testExecuteBuybackSuccessPath() public {
+        season.fundRedemption{value: 5 ether}();
+        season.createPoolAndDeployLiquidity();
+        season.startSeason();
+
+        // Bootstrap pool with trades so TWAP observations exist
+        address bootstrapper = makeAddr("buybackBootstrapper");
+        vm.deal(bootstrapper, 20 ether);
+        vm.startPrank(bootstrapper);
+        weth.deposit{value: 10 ether}();
+        weth.approve(address(swapRouter), 10 ether);
+        ISwapRouter02.ExactInputSingleParams memory params = ISwapRouter02.ExactInputSingleParams({
+            tokenIn: address(weth),
+            tokenOut: address(hiroToken),
+            fee: 3000,
+            recipient: bootstrapper,
+            amountIn: 10 ether,
+            amountOutMinimum: 0,
+            sqrtPriceLimitX96: 0
+        });
+        swapRouter.exactInputSingle(params);
+        vm.stopPrank();
+
+        // Advance time so TWAP has observations
+        vm.warp(block.timestamp + 10 minutes);
+
+        // Send extra ETH beyond redemption pool
+        (bool sent,) = address(season).call{value: 3 ether}("");
+        require(sent);
+
+        uint256 availableBefore = season.availableForBuyback();
+        assertTrue(availableBefore > 0, "Should have funds for buyback");
+
+        uint256 hiroBefore = hiroToken.balanceOf(address(season));
+
+        vm.expectEmit(false, false, false, false);
+        emit BuybackExecuted(0, 0); // Just check event is emitted
+
+        season.executeBuyback();
+
+        uint256 hiroAfter = hiroToken.balanceOf(address(season));
+        assertTrue(hiroAfter > hiroBefore, "HIRO balance should increase after buyback");
+        assertEq(season.availableForBuyback(), 0, "Available for buyback should be 0 after");
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // PARTIAL + SEQUENTIAL REDEMPTIONS
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    function testPartialAndSequentialRedemptions() public {
+        season.fundRedemption{value: 10 ether}();
+        season.createPoolAndDeployLiquidity();
+        season.startSeason();
+
+        // Get HIRO to a user
+        address redeemer = makeAddr("sequentialRedeemer");
+        vm.deal(redeemer, 10 ether);
+        vm.startPrank(redeemer);
+        weth.deposit{value: 5 ether}();
+        weth.approve(address(swapRouter), 5 ether);
+        ISwapRouter02.ExactInputSingleParams memory params = ISwapRouter02.ExactInputSingleParams({
+            tokenIn: address(weth),
+            tokenOut: address(hiroToken),
+            fee: 3000,
+            recipient: redeemer,
+            amountIn: 5 ether,
+            amountOutMinimum: 0,
+            sqrtPriceLimitX96: 0
+        });
+        uint256 hiroReceived = swapRouter.exactInputSingle(params);
+        vm.stopPrank();
+
+        assertTrue(hiroReceived > 0, "Should have received HIRO");
+
+        vm.warp(block.timestamp + 30 days + 1);
+        season.endSeason();
+        season.openRedemption(0);
+
+        // Calculate expected total ETH for full redemption
+        uint256 expectedTotalETH = season.calculateRedemption(hiroReceived);
+
+        // Redeem first half
+        uint256 firstHalf = hiroReceived / 2;
+        uint256 secondHalf = hiroReceived - firstHalf;
+
+        uint256 ethBefore = redeemer.balance;
+
+        vm.startPrank(redeemer);
+        hiroToken.approve(address(season), hiroReceived);
+        season.redeem(firstHalf);
+        uint256 ethAfterFirst = redeemer.balance;
+
+        // Redeem second half
+        season.redeem(secondHalf);
+        vm.stopPrank();
+
+        uint256 totalETHReceived = redeemer.balance - ethBefore;
+
+        // Total ETH from two partial redemptions should match full amount within 1 wei rounding
+        uint256 diff =
+            totalETHReceived > expectedTotalETH ? totalETHReceived - expectedTotalETH : expectedTotalETH - totalETHReceived;
+        assertTrue(diff <= 1, "Sequential redemptions should match full amount (within 1 wei)");
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // SET BUYBACK SETTINGS
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    function testSetBuybackSettingsAsOwner() public {
+        vm.expectEmit(false, false, false, true);
+        emit BuybackSettingsUpdated(200, 300);
+
+        season.setBuybackSettings(200, 300);
+        assertEq(season.slippageBps(), 200);
+        assertEq(season.priceImpactBps(), 300);
+    }
+
+    function testSetBuybackSettingsNonOwnerReverts() public {
+        vm.prank(users[0]);
+        vm.expectRevert("Ownable: caller is not the owner");
+        season.setBuybackSettings(200, 300);
+    }
+
+    function testSetBuybackSettingsExceedsMaxBpsReverts() public {
+        vm.expectRevert("Slippage too high");
+        season.setBuybackSettings(1001, 200);
+
+        vm.expectRevert("Price impact too high");
+        season.setBuybackSettings(200, 1001);
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // RECEIVE() ETH AUTO-WRAPPING
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    function testReceiveAutoWrapsETH() public {
+        uint256 wethBefore = weth.balanceOf(address(season));
+        uint256 ethAmount = 2 ether;
+
+        (bool success,) = address(season).call{value: ethAmount}("");
+        assertTrue(success, "ETH transfer should succeed");
+
+        assertEq(weth.balanceOf(address(season)), wethBefore + ethAmount, "WETH should increase");
+        assertEq(address(season).balance, 0, "ETH balance should remain 0");
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // ZERO CIRCULATING SUPPLY EDGE CASE
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    function testRedeemRevertsWhenZeroCirculatingSupply() public {
+        season.fundRedemption{value: 10 ether}();
+        season.createPoolAndDeployLiquidity();
+        season.startSeason();
+
+        // Don't buy any HIRO — no circulating supply outside the contract
+        vm.warp(block.timestamp + 30 days + 1);
+        season.endSeason();
+        season.openRedemption(0);
+
+        // totalRedeemableHiro should be 0 or dust (LP withdrawal may leave tiny amounts)
+        assertTrue(season.totalRedeemableHiro() <= 1, "Should be 0 or dust");
+
+        // Attempting to redeem should revert (either "No HIRO to redeem" or "Amount too small")
+        vm.expectRevert();
+        season.redeem(1);
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // VIEW FUNCTION TESTS
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    function testSeasonEndTimeReturnsZeroBeforeStart() public {
+        assertEq(season.seasonEndTime(), 0, "Should be 0 before season starts");
+    }
+
+    function testSeasonEndTimeReturnsCorrectAfterStart() public {
+        season.createPoolAndDeployLiquidity();
+        season.startSeason();
+        uint256 expected = block.timestamp + 30 days;
+        assertEq(season.seasonEndTime(), expected, "Should return correct end time");
+    }
+
+    function testGetCurrentHiroPriceBeforePool() public {
+        assertEq(season.getCurrentHiroPrice(), 0, "Price should be 0 before pool");
+    }
+
+    function testGetCurrentHiroPriceAfterTrades() public {
+        season.createPoolAndDeployLiquidity();
+        season.startSeason();
+
+        // Trade to move into range
+        address trader = makeAddr("priceTrader");
+        vm.deal(trader, 10 ether);
+        vm.startPrank(trader);
+        weth.deposit{value: 5 ether}();
+        weth.approve(address(swapRouter), 5 ether);
+        ISwapRouter02.ExactInputSingleParams memory params = ISwapRouter02.ExactInputSingleParams({
+            tokenIn: address(weth),
+            tokenOut: address(hiroToken),
+            fee: 3000,
+            recipient: trader,
+            amountIn: 5 ether,
+            amountOutMinimum: 0,
+            sqrtPriceLimitX96: 0
+        });
+        swapRouter.exactInputSingle(params);
+        vm.stopPrank();
+
+        uint256 price = season.getCurrentHiroPrice();
+        assertTrue(price > 0, "Price should be > 0 after trades");
+    }
+
+    function testPreviewBuybackWithFunds() public {
+        season.fundRedemption{value: 5 ether}();
+        season.createPoolAndDeployLiquidity();
+        season.startSeason();
+
+        // Bootstrap trading for TWAP observations
+        address trader = makeAddr("previewTrader");
+        vm.deal(trader, 10 ether);
+        vm.startPrank(trader);
+        weth.deposit{value: 5 ether}();
+        weth.approve(address(swapRouter), 5 ether);
+        ISwapRouter02.ExactInputSingleParams memory params = ISwapRouter02.ExactInputSingleParams({
+            tokenIn: address(weth),
+            tokenOut: address(hiroToken),
+            fee: 3000,
+            recipient: trader,
+            amountIn: 5 ether,
+            amountOutMinimum: 0,
+            sqrtPriceLimitX96: 0
+        });
+        swapRouter.exactInputSingle(params);
+        vm.stopPrank();
+
+        vm.warp(block.timestamp + 10 minutes);
+
+        // Send extra ETH beyond redemption pool
+        (bool sent,) = address(season).call{value: 2 ether}("");
+        require(sent);
+
+        (uint256 available, uint256 expectedHiro, uint256 minHiroOut, uint160 sqrtPriceLimit) =
+            season.previewBuyback();
+        assertTrue(available > 0, "Should have available funds");
+        assertTrue(expectedHiro > 0, "Expected HIRO should be > 0");
+        assertTrue(minHiroOut > 0, "Min HIRO out should be > 0");
+        assertTrue(minHiroOut <= expectedHiro, "Min should be <= expected");
+        assertTrue(sqrtPriceLimit > 0, "Price limit should be > 0");
+    }
+
+    function testMultipleFundRedemptionAccumulates() public {
+        season.fundRedemption{value: 3 ether}();
+        assertEq(season.redemptionPool(), 3 ether);
+
+        season.fundRedemption{value: 2 ether}();
+        assertEq(season.redemptionPool(), 5 ether);
+
+        season.fundRedemption{value: 5 ether}();
+        assertEq(season.redemptionPool(), 10 ether);
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
