@@ -69,4 +69,17 @@ contract HiroWallet is ReentrancyGuard {
             emit Executed(targets[i], msg.sender, ethAmounts[i]);
         }
     }
+
+    // ERC721/ERC1155 receiver interfaces
+    function onERC721Received(address, address, uint256, bytes calldata) external pure returns (bytes4) {
+        return this.onERC721Received.selector;
+    }
+
+    function onERC1155Received(address, address, uint256, uint256, bytes calldata) external pure returns (bytes4) {
+        return this.onERC1155Received.selector;
+    }
+
+    function onERC1155BatchReceived(address, address, uint256[] calldata, uint256[] calldata, bytes calldata) external pure returns (bytes4) {
+        return this.onERC1155BatchReceived.selector;
+    }
 }

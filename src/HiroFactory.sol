@@ -7,6 +7,7 @@ import "./interfaces/IHiroFactory.sol";
 import "lib/openzeppelin-contracts/contracts/access/Ownable.sol";
 import "lib/openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
 import "lib/openzeppelin-contracts/contracts/token/ERC20/SafeERC20.sol";
+import "lib/openzeppelin-contracts/contracts/utils/Create2.sol";
 
 contract HiroFactory is Ownable, IHiroFactory {
     using SafeERC20 for IERC20;
@@ -36,13 +37,21 @@ contract HiroFactory is Ownable, IHiroFactory {
     function createHiroWallet() external payable override returns (address payable) {
         require(ownerToWallet[msg.sender] == address(0), "Subcontract already exists");
 
-        HiroWallet wallet = new HiroWallet{value: msg.value}(msg.sender);
+        bytes32 salt = keccak256(abi.encode(msg.sender));
+        bytes memory bytecode = abi.encodePacked(type(HiroWallet).creationCode, abi.encode(msg.sender));
+        address wallet = Create2.deploy(msg.value, salt, bytecode);
 
-        ownerToWallet[msg.sender] = address(wallet);
+        ownerToWallet[msg.sender] = wallet;
 
-        emit HiroCreated(msg.sender, address(wallet));
+        emit HiroCreated(msg.sender, wallet);
 
         return payable(wallet);
+    }
+
+    function predictWalletAddress(address owner) public view override returns (address) {
+        bytes32 salt = keccak256(abi.encode(owner));
+        bytes memory bytecode = abi.encodePacked(type(HiroWallet).creationCode, abi.encode(owner));
+        return Create2.computeAddress(salt, keccak256(bytecode));
     }
 
     function sweep(address token, uint256 amount) external override onlyOwner {

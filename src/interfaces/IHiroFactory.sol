@@ -12,4 +12,5 @@ abstract contract IHiroFactory {
     function removeFromWhitelist(address addr) external virtual;
     function isAgent(address addr) external view virtual returns (bool);
     function setAgent(address addr, bool b) external virtual;
+    function predictWalletAddress(address owner) public view virtual returns (address);
 }

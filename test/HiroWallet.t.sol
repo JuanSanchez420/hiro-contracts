@@ -6,6 +6,32 @@ import {Test} from "forge-std/Test.sol";
 import {HiroWallet} from "../src/HiroWallet.sol";
 import {HiroFactory} from "../src/HiroFactory.sol";
 import "lib/openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
+import "lib/openzeppelin-contracts/contracts/token/ERC721/ERC721.sol";
+import "lib/openzeppelin-contracts/contracts/token/ERC1155/ERC1155.sol";
+
+contract MockERC721 is ERC721 {
+    uint256 private _nextTokenId;
+
+    constructor() ERC721("MockNFT", "MNFT") {}
+
+    function safeMint(address to) external returns (uint256) {
+        uint256 tokenId = _nextTokenId++;
+        _safeMint(to, tokenId);
+        return tokenId;
+    }
+}
+
+contract MockERC1155 is ERC1155 {
+    constructor() ERC1155("https://mock.uri/") {}
+
+    function mint(address to, uint256 id, uint256 amount) external {
+        _mint(to, id, amount, "");
+    }
+
+    function mintBatch(address to, uint256[] memory ids, uint256[] memory amounts) external {
+        _mintBatch(to, ids, amounts, "");
+    }
+}
 
 contract MockContract {
     uint256 public value;
@@ -701,6 +727,38 @@ contract TestHiroWallet is Test {
         hiroWallet.execute(targets, dataArray, values);
 
         assertEq(mock.lastReceivedValue(), 0.25 ether);
+    }
+
+    // ==================== ERC721/ERC1155 RECEIVER TESTS ====================
+
+    function testCanReceiveERC721() public {
+        MockERC721 nft = new MockERC721();
+        uint256 tokenId = nft.safeMint(address(hiroWallet));
+        assertEq(nft.ownerOf(tokenId), address(hiroWallet));
+    }
+
+    function testCanReceiveERC1155() public {
+        MockERC1155 token = new MockERC1155();
+        token.mint(address(hiroWallet), 1, 100);
+        assertEq(token.balanceOf(address(hiroWallet), 1), 100);
+    }
+
+    function testCanReceiveERC1155Batch() public {
+        MockERC1155 token = new MockERC1155();
+        uint256[] memory ids = new uint256[](3);
+        ids[0] = 1;
+        ids[1] = 2;
+        ids[2] = 3;
+        uint256[] memory amounts = new uint256[](3);
+        amounts[0] = 10;
+        amounts[1] = 20;
+        amounts[2] = 30;
+
+        token.mintBatch(address(hiroWallet), ids, amounts);
+
+        assertEq(token.balanceOf(address(hiroWallet), 1), 10);
+        assertEq(token.balanceOf(address(hiroWallet), 2), 20);
+        assertEq(token.balanceOf(address(hiroWallet), 3), 30);
     }
 
     function testMultipleWithdrawals() public {

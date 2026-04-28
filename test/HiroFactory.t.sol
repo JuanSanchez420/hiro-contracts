@@ -236,6 +236,52 @@ contract HiroFactoryTest is Test {
         HiroWallet(payable(wallet2)).execute(targets, dataArray, values);
     }
 
+    // ==================== CREATE2 DETERMINISM TESTS ====================
+
+    function testPredictWalletAddress() public {
+        // Predict address before deployment
+        address predicted = hiroFactory.predictWalletAddress(USER);
+
+        // Deploy wallet
+        address actual = _createWallet(USER, 0);
+
+        // Predicted must match actual
+        assertEq(predicted, actual);
+    }
+
+    function testPredictWalletAddressMultipleUsers() public {
+        // Different users should get different predicted addresses
+        address predictedUser = hiroFactory.predictWalletAddress(USER);
+        address predictedOther = hiroFactory.predictWalletAddress(OTHER_USER);
+        assertTrue(predictedUser != predictedOther);
+
+        // Both should match their actual deployments
+        address actualUser = _createWallet(USER, 0);
+        address actualOther = _createWallet(OTHER_USER, 0);
+        assertEq(predictedUser, actualUser);
+        assertEq(predictedOther, actualOther);
+    }
+
+    function testCreateWalletStillWorks() public {
+        // Basic wallet creation still works as before
+        vm.startPrank(USER);
+        address payable wallet = hiroFactory.createHiroWallet{value: 1 ether}();
+        vm.stopPrank();
+
+        // Wallet is recorded
+        assertEq(hiroFactory.ownerToWallet(USER), wallet);
+        assertEq(hiroFactory.getWallet(USER), wallet);
+        assertTrue(wallet != address(0));
+
+        // Wallet received the ETH
+        assertEq(address(wallet).balance, 1 ether);
+
+        // Wallet has correct owner and factory
+        HiroWallet w = HiroWallet(wallet);
+        assertEq(w.owner(), USER);
+        assertEq(w.factory(), address(hiroFactory));
+    }
+
     function testNonOwnerCannotManageWhitelist() public {
         vm.prank(OTHER_USER);
         vm.expectRevert("Ownable: caller is not the owner");
