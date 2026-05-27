@@ -20,7 +20,7 @@ ANVIL_ACCOUNTS := \
 
 fork:
 	@pkill -f "^anvil" >/dev/null 2>&1 || true
-	@anvil --fork-url $(BASE_RPC) --chain-id $(CHAIN_ID) --host 127.0.0.1 --port 8545 & \
+	@anvil --fork-url $(BASE_RPC) --chain-id $(CHAIN_ID) --host 127.0.0.1 --port 8545 --no-rate-limit & \
 	ANVIL_PID=$$!; \
 	until cast chain-id --rpc-url $(ANVIL_URL) >/dev/null 2>&1; do sleep 0.2; done; \
 	for a in $(ANVIL_ACCOUNTS); do \
