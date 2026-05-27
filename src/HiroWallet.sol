@@ -9,20 +9,22 @@ import "lib/openzeppelin-contracts/contracts/security/ReentrancyGuard.sol";
 contract HiroWallet is ReentrancyGuard {
     using SafeERC20 for IERC20;
 
+    error NotOwner();
+    error CallFailed();
+    error InsufficientETH();
+    error EthTransferFailed();
+    error EmptyCalls();
+    error LengthMismatch();
+
     address public immutable owner;
     address public immutable factory;
 
+    event Executed(address indexed target, uint256 value);
+
     modifier onlyOwner() {
-        require(msg.sender == owner, "Not the owner");
+        if (msg.sender != owner) revert NotOwner();
         _;
     }
-
-    modifier onlyAgent() {
-        require(IHiroFactory(factory).isAgent(msg.sender), "Not an agent");
-        _;
-    }
-
-    event Executed(address indexed target, address indexed caller, uint256 value);
 
     constructor(address _owner) payable {
         owner = _owner;
@@ -31,43 +33,41 @@ contract HiroWallet is ReentrancyGuard {
 
     receive() external payable {}
 
-    // Owner functions
     function withdraw(address token, uint256 amount) external onlyOwner nonReentrant {
         IERC20(token).safeTransfer(msg.sender, amount);
     }
 
     function withdrawETH(uint256 amount) external onlyOwner nonReentrant {
-        require(amount <= address(this).balance, "Insufficient ETH balance");
+        if (amount > address(this).balance) revert InsufficientETH();
         (bool success,) = payable(owner).call{value: amount}("");
-        require(success, "ETH transfer failed");
+        if (!success) revert EthTransferFailed();
     }
 
     function execute(address[] calldata targets, bytes[] calldata dataArray, uint256[] calldata ethAmounts)
         external
-        onlyAgent
+        onlyOwner
         nonReentrant
     {
         uint256 length = targets.length;
-        require(length > 0, "No calls provided");
-        require(length == dataArray.length && length == ethAmounts.length, "Array length mismatch");
+        if (length == 0) revert EmptyCalls();
+        if (length != dataArray.length || length != ethAmounts.length) revert LengthMismatch();
 
         uint256 totalEth;
         for (uint256 i = 0; i < length; i++) {
             totalEth += ethAmounts[i];
         }
-        require(totalEth <= address(this).balance, "Not enough ETH on wallet");
+        if (totalEth > address(this).balance) revert InsufficientETH();
 
         for (uint256 i = 0; i < length; i++) {
-            require(targets[i] == factory || IHiroFactory(factory).isWhitelisted(targets[i]), "Address not whitelisted");
+            IHiroFactory(factory).validateCall(targets[i]);
 
             (bool success,) = payable(targets[i]).call{value: ethAmounts[i]}(dataArray[i]);
-            require(success, "Call failed");
+            if (!success) revert CallFailed();
 
-            emit Executed(targets[i], msg.sender, ethAmounts[i]);
+            emit Executed(targets[i], ethAmounts[i]);
         }
     }
 
-    // ERC721/ERC1155 receiver interfaces
     function onERC721Received(address, address, uint256, bytes calldata) external pure returns (bytes4) {
         return this.onERC721Received.selector;
     }
@@ -76,7 +76,11 @@ contract HiroWallet is ReentrancyGuard {
         return this.onERC1155Received.selector;
     }
 
-    function onERC1155BatchReceived(address, address, uint256[] calldata, uint256[] calldata, bytes calldata) external pure returns (bytes4) {
+    function onERC1155BatchReceived(address, address, uint256[] calldata, uint256[] calldata, bytes calldata)
+        external
+        pure
+        returns (bytes4)
+    {
         return this.onERC1155BatchReceived.selector;
     }
 }

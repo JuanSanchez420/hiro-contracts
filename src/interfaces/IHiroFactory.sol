@@ -1,16 +1,21 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
-abstract contract IHiroFactory {
-    function ownerToWallet(address) external view virtual returns (address);
-    function createHiroWallet() external payable virtual returns (address payable);
-    function getWallet(address owner) external view virtual returns (address);
-    function sweep(address token, uint256 amount) external virtual;
-    function sweepETH() external virtual;
-    function isWhitelisted(address addr) external view virtual returns (bool);
-    function addToWhitelist(address addr) external virtual;
-    function removeFromWhitelist(address addr) external virtual;
-    function isAgent(address addr) external view virtual returns (bool);
-    function setAgent(address addr, bool b) external virtual;
-    function predictWalletAddress(address owner) public view virtual returns (address);
+interface IHiroFactory {
+    function ownerToWallet(address) external view returns (address);
+    function createHiroWallet() external payable returns (address payable);
+    function getWallet(address owner) external view returns (address);
+    function predictWalletAddress(address owner) external view returns (address);
+
+    function sweep(address token, uint256 amount) external;
+    function sweepETH() external;
+
+    function targetWhitelist(address) external view returns (bool);
+    function validateCall(address target) external view;
+    function paused() external view returns (bool);
+
+    function pause() external;
+    function unpause() external;
+    function addTarget(address target) external;
+    function removeTarget(address target) external;
 }

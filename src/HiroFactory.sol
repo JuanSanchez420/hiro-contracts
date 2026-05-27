@@ -11,30 +11,32 @@ import "lib/openzeppelin-contracts/contracts/utils/Create2.sol";
 contract HiroFactory is Ownable, IHiroFactory {
     using SafeERC20 for IERC20;
 
+    error SubcontractExists();
+    error InvalidAddress();
+    error EthTransferFailed();
+    error Paused();
+    error TargetNotWhitelisted();
+
     event HiroCreated(address indexed owner, address indexed wallet);
-    event Whitelisted(address indexed addr);
-    event RemovedFromWhitelist(address indexed addr);
-    event AgentUpdated(address indexed addr, bool isAgent);
+    event TargetAdded(address indexed target);
+    event TargetRemoved(address indexed target);
+    event PausedSet(bool paused);
 
     mapping(address => address) public override ownerToWallet;
+    mapping(address => bool) public override targetWhitelist;
+    bool public override paused;
 
-    mapping(address => bool) private whitelist;
-    mapping(address => bool) private agents;
-
-    constructor(address[] memory _whitelist, address[] memory _agents) {
-        for (uint256 i = 0; i < _whitelist.length; i++) {
-            whitelist[_whitelist[i]] = true;
-        }
-
-        for (uint256 i = 0; i < _agents.length; i++) {
-            agents[_agents[i]] = true;
+    constructor(address[] memory _initialTargets) {
+        for (uint256 i = 0; i < _initialTargets.length; i++) {
+            if (_initialTargets[i] == address(0)) revert InvalidAddress();
+            targetWhitelist[_initialTargets[i]] = true;
         }
     }
 
     receive() external payable {}
 
     function createHiroWallet() external payable override returns (address payable) {
-        require(ownerToWallet[msg.sender] == address(0), "Subcontract already exists");
+        if (ownerToWallet[msg.sender] != address(0)) revert SubcontractExists();
 
         bytes32 salt = keccak256(abi.encode(msg.sender));
         bytes memory bytecode = abi.encodePacked(type(HiroWallet).creationCode, abi.encode(msg.sender));
@@ -47,10 +49,14 @@ contract HiroFactory is Ownable, IHiroFactory {
         return payable(wallet);
     }
 
-    function predictWalletAddress(address owner) public view override returns (address) {
+    function predictWalletAddress(address owner) external view override returns (address) {
         bytes32 salt = keccak256(abi.encode(owner));
         bytes memory bytecode = abi.encodePacked(type(HiroWallet).creationCode, abi.encode(owner));
         return Create2.computeAddress(salt, keccak256(bytecode));
+    }
+
+    function getWallet(address owner) external view override returns (address) {
+        return ownerToWallet[owner];
     }
 
     function sweep(address token, uint256 amount) external override onlyOwner {
@@ -59,37 +65,36 @@ contract HiroFactory is Ownable, IHiroFactory {
 
     function sweepETH() external override onlyOwner {
         (bool success,) = payable(msg.sender).call{value: address(this).balance}("");
-        require(success, "ETH transfer failed");
+        if (!success) revert EthTransferFailed();
     }
 
-    function addToWhitelist(address addr) external override onlyOwner {
-        require(addr != address(0), "Invalid address");
-        whitelist[addr] = true;
-
-        emit Whitelisted(addr);
+    function validateCall(address target) external view override {
+        if (paused) revert Paused();
+        if (target == address(this)) return;
+        if (!targetWhitelist[target]) revert TargetNotWhitelisted();
     }
 
-    function removeFromWhitelist(address addr) external override onlyOwner {
-        require(addr != address(0), "Invalid address");
-        whitelist[addr] = false;
-
-        emit RemovedFromWhitelist(addr);
+    function pause() external override onlyOwner {
+        paused = true;
+        emit PausedSet(true);
     }
 
-    function isWhitelisted(address addr) external view override returns (bool) {
-        return whitelist[addr];
+    function unpause() external override onlyOwner {
+        paused = false;
+        emit PausedSet(false);
     }
 
-    function getWallet(address owner) external view override returns (address) {
-        return ownerToWallet[owner];
+    function addTarget(address target) external override onlyOwner {
+        if (target == address(0)) revert InvalidAddress();
+        if (targetWhitelist[target]) return;
+        targetWhitelist[target] = true;
+        emit TargetAdded(target);
     }
 
-    function isAgent(address addr) external view override returns (bool) {
-        return agents[addr];
-    }
-
-    function setAgent(address addr, bool b) external override onlyOwner {
-        agents[addr] = b;
-        emit AgentUpdated(addr, b);
+    function removeTarget(address target) external override onlyOwner {
+        if (target == address(0)) revert InvalidAddress();
+        if (!targetWhitelist[target]) return;
+        targetWhitelist[target] = false;
+        emit TargetRemoved(target);
     }
 }

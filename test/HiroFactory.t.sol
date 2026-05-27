@@ -10,29 +10,29 @@ contract HiroFactoryTest is Test {
 
     address public constant USER = address(0x1234);
     address public constant OTHER_USER = address(0x5678);
-    address public constant INITIAL_AGENT = address(0x9999);
-    address public constant INITIAL_WHITELIST = address(0x1111);
+    address public constant INITIAL_TARGET = address(0x1111);
+
+    event PausedSet(bool paused);
+    event TargetAdded(address indexed target);
+    event TargetRemoved(address indexed target);
 
     receive() external payable {}
 
     function setUp() public {
-        address[] memory whitelist = new address[](1);
-        whitelist[0] = INITIAL_WHITELIST;
+        address[] memory initialTargets = new address[](1);
+        initialTargets[0] = INITIAL_TARGET;
 
-        address[] memory agents = new address[](1);
-        agents[0] = INITIAL_AGENT;
-
-        hiroFactory = new HiroFactory(whitelist, agents);
+        hiroFactory = new HiroFactory(initialTargets);
 
         vm.deal(USER, 5 ether);
         vm.deal(OTHER_USER, 5 ether);
         vm.deal(address(this), 5 ether);
     }
 
-    function testConstructorSeedsWhitelistAndAgents() public view {
-        assertTrue(hiroFactory.isWhitelisted(INITIAL_WHITELIST));
-        assertTrue(hiroFactory.isAgent(INITIAL_AGENT));
-        assertFalse(hiroFactory.isAgent(OTHER_USER));
+    function testConstructorSeedsTargets() public view {
+        assertTrue(hiroFactory.targetWhitelist(INITIAL_TARGET));
+        assertFalse(hiroFactory.targetWhitelist(OTHER_USER));
+        assertFalse(hiroFactory.paused());
     }
 
     function testCreateWalletRecordsOwner() public {
@@ -63,33 +63,34 @@ contract HiroFactoryTest is Test {
     function testPreventDuplicateWalletCreation() public {
         vm.startPrank(USER);
         hiroFactory.createHiroWallet();
-        vm.expectRevert("Subcontract already exists");
+        vm.expectRevert(HiroFactory.SubcontractExists.selector);
         hiroFactory.createHiroWallet();
         vm.stopPrank();
     }
 
-    function testWhitelistManagement() public {
+    function testTargetWhitelistManagement() public {
         address newTarget = address(0xBEEF);
-        hiroFactory.addToWhitelist(newTarget);
-        assertTrue(hiroFactory.isWhitelisted(newTarget));
 
-        hiroFactory.removeFromWhitelist(newTarget);
-        assertFalse(hiroFactory.isWhitelisted(newTarget));
+        vm.expectEmit(true, false, false, true, address(hiroFactory));
+        emit TargetAdded(newTarget);
+        hiroFactory.addTarget(newTarget);
+        assertTrue(hiroFactory.targetWhitelist(newTarget));
+
+        vm.expectEmit(true, false, false, true, address(hiroFactory));
+        emit TargetRemoved(newTarget);
+        hiroFactory.removeTarget(newTarget);
+        assertFalse(hiroFactory.targetWhitelist(newTarget));
     }
 
-    function testAgentManagementRequiresOwnership() public {
-        address newAgent = address(0xAAAA);
-        hiroFactory.setAgent(newAgent, true);
-        assertTrue(hiroFactory.isAgent(newAgent));
+    function testAddRemoveTargetRejectZeroAddress() public {
+        vm.expectRevert(HiroFactory.InvalidAddress.selector);
+        hiroFactory.addTarget(address(0));
 
-        vm.prank(OTHER_USER);
-        vm.expectRevert("Ownable: caller is not the owner");
-        hiroFactory.setAgent(newAgent, false);
+        vm.expectRevert(HiroFactory.InvalidAddress.selector);
+        hiroFactory.removeTarget(address(0));
     }
 
     function testOwnerCanSweepEth() public {
-        // Factory no longer has receive(), so use vm.deal to simulate
-        // ETH arriving via selfdestruct or other forced mechanisms
         vm.deal(address(hiroFactory), 1 ether);
 
         uint256 balanceBefore = address(this).balance;
@@ -97,61 +98,21 @@ contract HiroFactoryTest is Test {
         assertEq(address(this).balance, balanceBefore + 1 ether);
     }
 
-    function _createWallet(address walletOwner, uint256 value) internal returns (address walletAddress) {
-        vm.startPrank(walletOwner);
-        walletAddress = hiroFactory.createHiroWallet{value: value}();
-        vm.stopPrank();
-    }
-
-    // ==================== EDGE CASE TESTS ====================
-
     function testSweepETHWithZeroBalance() public {
-        // Ensure factory has no ETH
         assertEq(address(hiroFactory).balance, 0);
 
         uint256 balanceBefore = address(this).balance;
-
-        // Should succeed even with zero balance
         hiroFactory.sweepETH();
-
         assertEq(address(this).balance, balanceBefore);
     }
 
-    function testSetAgentTwiceWithSameValue() public {
-        address newAgent = address(0xAAAA);
-
-        // Set agent to true
-        hiroFactory.setAgent(newAgent, true);
-        assertTrue(hiroFactory.isAgent(newAgent));
-
-        // Set agent to true again - should be idempotent
-        hiroFactory.setAgent(newAgent, true);
-        assertTrue(hiroFactory.isAgent(newAgent));
-
-        // Set agent to false
-        hiroFactory.setAgent(newAgent, false);
-        assertFalse(hiroFactory.isAgent(newAgent));
-
-        // Set agent to false again - should be idempotent
-        hiroFactory.setAgent(newAgent, false);
-        assertFalse(hiroFactory.isAgent(newAgent));
-    }
-
-    function testWhitelistRemovalDoesNotAffectExistingWallets() public {
-        // Create a wallet
+    function testWhitelistRemovalAffectsExistingWallets() public {
         address walletAddress = _createWallet(USER, 1 ether);
         HiroWallet wallet = HiroWallet(payable(walletAddress));
 
-        // Add a target to whitelist
-        address target = address(0xBEEF);
-        hiroFactory.addToWhitelist(target);
-        assertTrue(hiroFactory.isWhitelisted(target));
-
-        // Create a mock that the wallet can call
         MockTarget mock = new MockTarget();
-        hiroFactory.addToWhitelist(address(mock));
+        hiroFactory.addTarget(address(mock));
 
-        // Agent calls mock through wallet - should work
         address[] memory targets = new address[](1);
         targets[0] = address(mock);
         bytes[] memory dataArray = new bytes[](1);
@@ -159,22 +120,17 @@ contract HiroFactoryTest is Test {
         uint256[] memory values = new uint256[](1);
         values[0] = 0;
 
-        vm.prank(INITIAL_AGENT);
+        vm.prank(USER);
         wallet.execute(targets, dataArray, values);
         assertEq(mock.value(), 42);
 
-        // Now remove mock from whitelist
-        hiroFactory.removeFromWhitelist(address(mock));
-        assertFalse(hiroFactory.isWhitelisted(address(mock)));
+        hiroFactory.removeTarget(address(mock));
+        assertFalse(hiroFactory.targetWhitelist(address(mock)));
 
-        // Existing wallet should now fail to call the removed address
         dataArray[0] = abi.encodeWithSelector(MockTarget.setValue.selector, 100);
-        vm.prank(INITIAL_AGENT);
-        vm.expectRevert("Address not whitelisted");
+        vm.prank(USER);
+        vm.expectRevert(HiroFactory.TargetNotWhitelisted.selector);
         wallet.execute(targets, dataArray, values);
-
-        // The wallet still exists and can call other whitelisted addresses
-        // This verifies whitelist changes propagate to all wallets
     }
 
     function testAddAndRemoveMultipleFromWhitelist() public {
@@ -183,78 +139,28 @@ contract HiroFactoryTest is Test {
         addresses[1] = address(0x2222);
         addresses[2] = address(0x3333);
 
-        // Add all
         for (uint256 i = 0; i < 3; i++) {
-            hiroFactory.addToWhitelist(addresses[i]);
-            assertTrue(hiroFactory.isWhitelisted(addresses[i]));
+            hiroFactory.addTarget(addresses[i]);
+            assertTrue(hiroFactory.targetWhitelist(addresses[i]));
         }
 
-        // Remove middle one
-        hiroFactory.removeFromWhitelist(addresses[1]);
-        assertTrue(hiroFactory.isWhitelisted(addresses[0]));
-        assertFalse(hiroFactory.isWhitelisted(addresses[1]));
-        assertTrue(hiroFactory.isWhitelisted(addresses[2]));
+        hiroFactory.removeTarget(addresses[1]);
+        assertTrue(hiroFactory.targetWhitelist(addresses[0]));
+        assertFalse(hiroFactory.targetWhitelist(addresses[1]));
+        assertTrue(hiroFactory.targetWhitelist(addresses[2]));
     }
-
-    function testAgentStatusPersistsAcrossWallets() public {
-        // Create two wallets for different users
-        address wallet1 = _createWallet(USER, 0);
-        address wallet2 = _createWallet(OTHER_USER, 0);
-
-        // Create a mock target
-        MockTarget mock = new MockTarget();
-        hiroFactory.addToWhitelist(address(mock));
-
-        // Initial agent can execute on both wallets
-        address[] memory targets = new address[](1);
-        targets[0] = address(mock);
-        bytes[] memory dataArray = new bytes[](1);
-        dataArray[0] = abi.encodeWithSelector(MockTarget.setValue.selector, 10);
-        uint256[] memory values = new uint256[](1);
-        values[0] = 0;
-
-        vm.prank(INITIAL_AGENT);
-        HiroWallet(payable(wallet1)).execute(targets, dataArray, values);
-        assertEq(mock.value(), 10);
-
-        dataArray[0] = abi.encodeWithSelector(MockTarget.setValue.selector, 20);
-        vm.prank(INITIAL_AGENT);
-        HiroWallet(payable(wallet2)).execute(targets, dataArray, values);
-        assertEq(mock.value(), 20);
-
-        // Remove agent
-        hiroFactory.setAgent(INITIAL_AGENT, false);
-
-        // Agent cannot execute on either wallet now
-        vm.prank(INITIAL_AGENT);
-        vm.expectRevert("Not an agent");
-        HiroWallet(payable(wallet1)).execute(targets, dataArray, values);
-
-        vm.prank(INITIAL_AGENT);
-        vm.expectRevert("Not an agent");
-        HiroWallet(payable(wallet2)).execute(targets, dataArray, values);
-    }
-
-    // ==================== CREATE2 DETERMINISM TESTS ====================
 
     function testPredictWalletAddress() public {
-        // Predict address before deployment
         address predicted = hiroFactory.predictWalletAddress(USER);
-
-        // Deploy wallet
         address actual = _createWallet(USER, 0);
-
-        // Predicted must match actual
         assertEq(predicted, actual);
     }
 
     function testPredictWalletAddressMultipleUsers() public {
-        // Different users should get different predicted addresses
         address predictedUser = hiroFactory.predictWalletAddress(USER);
         address predictedOther = hiroFactory.predictWalletAddress(OTHER_USER);
         assertTrue(predictedUser != predictedOther);
 
-        // Both should match their actual deployments
         address actualUser = _createWallet(USER, 0);
         address actualOther = _createWallet(OTHER_USER, 0);
         assertEq(predictedUser, actualUser);
@@ -262,20 +168,15 @@ contract HiroFactoryTest is Test {
     }
 
     function testCreateWalletStillWorks() public {
-        // Basic wallet creation still works as before
         vm.startPrank(USER);
         address payable wallet = hiroFactory.createHiroWallet{value: 1 ether}();
         vm.stopPrank();
 
-        // Wallet is recorded
         assertEq(hiroFactory.ownerToWallet(USER), wallet);
         assertEq(hiroFactory.getWallet(USER), wallet);
         assertTrue(wallet != address(0));
-
-        // Wallet received the ETH
         assertEq(address(wallet).balance, 1 ether);
 
-        // Wallet has correct owner and factory
         HiroWallet w = HiroWallet(wallet);
         assertEq(w.owner(), USER);
         assertEq(w.factory(), address(hiroFactory));
@@ -284,11 +185,87 @@ contract HiroFactoryTest is Test {
     function testNonOwnerCannotManageWhitelist() public {
         vm.prank(OTHER_USER);
         vm.expectRevert("Ownable: caller is not the owner");
-        hiroFactory.addToWhitelist(address(0xDEAD));
+        hiroFactory.addTarget(address(0xDEAD));
 
         vm.prank(OTHER_USER);
         vm.expectRevert("Ownable: caller is not the owner");
-        hiroFactory.removeFromWhitelist(INITIAL_WHITELIST);
+        hiroFactory.removeTarget(INITIAL_TARGET);
+    }
+
+    // ==================== validateCall TESTS ====================
+
+    function testValidateCall_whitelistedTarget_succeeds() public view {
+        hiroFactory.validateCall(INITIAL_TARGET);
+    }
+
+    function testValidateCall_selfCall_alwaysAllowed() public view {
+        hiroFactory.validateCall(address(hiroFactory));
+    }
+
+    function testValidateCall_notWhitelisted_reverts() public {
+        vm.expectRevert(HiroFactory.TargetNotWhitelisted.selector);
+        hiroFactory.validateCall(address(0xDEAD));
+    }
+
+    function testValidateCall_paused_reverts() public {
+        hiroFactory.pause();
+        vm.expectRevert(HiroFactory.Paused.selector);
+        hiroFactory.validateCall(INITIAL_TARGET);
+    }
+
+    function testValidateCall_pausedTakesPrecedenceOverSelfCall() public {
+        hiroFactory.pause();
+        vm.expectRevert(HiroFactory.Paused.selector);
+        hiroFactory.validateCall(address(hiroFactory));
+    }
+
+    // ==================== pause / unpause TESTS ====================
+
+    function testPause_emitsAndSetsFlag() public {
+        vm.expectEmit(false, false, false, true, address(hiroFactory));
+        emit PausedSet(true);
+        hiroFactory.pause();
+        assertTrue(hiroFactory.paused());
+    }
+
+    function testUnpause_emitsAndClearsFlag() public {
+        hiroFactory.pause();
+        assertTrue(hiroFactory.paused());
+
+        vm.expectEmit(false, false, false, true, address(hiroFactory));
+        emit PausedSet(false);
+        hiroFactory.unpause();
+        assertFalse(hiroFactory.paused());
+    }
+
+    function testPause_isIdempotent() public {
+        hiroFactory.pause();
+        hiroFactory.pause();
+        assertTrue(hiroFactory.paused());
+    }
+
+    function testUnpause_isIdempotent() public {
+        hiroFactory.unpause();
+        assertFalse(hiroFactory.paused());
+    }
+
+    function testPause_onlyOwner() public {
+        vm.prank(OTHER_USER);
+        vm.expectRevert("Ownable: caller is not the owner");
+        hiroFactory.pause();
+    }
+
+    function testUnpause_onlyOwner() public {
+        hiroFactory.pause();
+        vm.prank(OTHER_USER);
+        vm.expectRevert("Ownable: caller is not the owner");
+        hiroFactory.unpause();
+    }
+
+    function _createWallet(address walletOwner, uint256 value) internal returns (address walletAddress) {
+        vm.startPrank(walletOwner);
+        walletAddress = hiroFactory.createHiroWallet{value: value}();
+        vm.stopPrank();
     }
 }
 
