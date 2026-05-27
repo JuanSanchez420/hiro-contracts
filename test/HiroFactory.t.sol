@@ -113,24 +113,24 @@ contract HiroFactoryTest is Test {
         MockTarget mock = new MockTarget();
         hiroFactory.addTarget(address(mock));
 
-        address[] memory targets = new address[](1);
-        targets[0] = address(mock);
-        bytes[] memory dataArray = new bytes[](1);
-        dataArray[0] = abi.encodeWithSelector(MockTarget.setValue.selector, 42);
-        uint256[] memory values = new uint256[](1);
-        values[0] = 0;
+        HiroWallet.Call[] memory calls = new HiroWallet.Call[](1);
+        calls[0] = HiroWallet.Call({
+            target: address(mock),
+            data: abi.encodeWithSelector(MockTarget.setValue.selector, 42),
+            value: 0
+        });
 
         vm.prank(USER);
-        wallet.execute(targets, dataArray, values);
+        wallet.executeAsOwner(calls);
         assertEq(mock.value(), 42);
 
         hiroFactory.removeTarget(address(mock));
         assertFalse(hiroFactory.targetWhitelist(address(mock)));
 
-        dataArray[0] = abi.encodeWithSelector(MockTarget.setValue.selector, 100);
+        calls[0].data = abi.encodeWithSelector(MockTarget.setValue.selector, 100);
         vm.prank(USER);
         vm.expectRevert(HiroFactory.TargetNotWhitelisted.selector);
-        wallet.execute(targets, dataArray, values);
+        wallet.executeAsOwner(calls);
     }
 
     function testAddAndRemoveMultipleFromWhitelist() public {

@@ -108,7 +108,7 @@ contract HiroSeason is Ownable, ReentrancyGuard {
     uint256 public totalRedeemableHiro; // Circulating supply at redemption open
 
     // Token ordering cache
-    bool private hiroIsToken0;
+    bool internal hiroIsToken0;
 
     // Buyback settings (in basis points, 100 bps = 1%)
     uint256 public slippageBps = 100; // Default 1%
@@ -291,12 +291,12 @@ contract HiroSeason is Ownable, ReentrancyGuard {
     }
 
     /// @notice Get current pool sqrt price
-    function _getCurrentSqrtPrice() internal view returns (uint160 sqrtPriceX96) {
+    function _getCurrentSqrtPrice() internal view virtual returns (uint160 sqrtPriceX96) {
         (sqrtPriceX96,,,,,,) = IUniswapV3Pool(pool).slot0();
     }
 
     /// @notice Get 5-minute TWAP sqrt price from pool observations
-    function _getTWAPSqrtPrice() internal view returns (uint160) {
+    function _getTWAPSqrtPrice() internal view virtual returns (uint160) {
         uint32[] memory secondsAgos = new uint32[](2);
         secondsAgos[0] = TWAP_INTERVAL;
         secondsAgos[1] = 0;
@@ -322,13 +322,11 @@ contract HiroSeason is Ownable, ReentrancyGuard {
         if (hiroIsToken0) {
             // HIRO=token0, WETH=token1. price = WETH/HIRO
             // HIRO = WETH * 2^192 / sqrtPrice^2
-            return wethAmount * (uint256(1) << 96) / uint256(sqrtPriceX96) * (uint256(1) << 96)
-                / uint256(sqrtPriceX96);
+            return wethAmount * (uint256(1) << 96) / uint256(sqrtPriceX96) * (uint256(1) << 96) / uint256(sqrtPriceX96);
         } else {
             // WETH=token0, HIRO=token1. price = HIRO/WETH
             // HIRO = WETH * sqrtPrice^2 / 2^192
-            return wethAmount * uint256(sqrtPriceX96) / (uint256(1) << 96) * uint256(sqrtPriceX96)
-                / (uint256(1) << 96);
+            return wethAmount * uint256(sqrtPriceX96) / (uint256(1) << 96) * uint256(sqrtPriceX96) / (uint256(1) << 96);
         }
     }
 
@@ -343,13 +341,11 @@ contract HiroSeason is Ownable, ReentrancyGuard {
 
         if (hiroIsToken0) {
             // Limit is higher price (buying pushes price up)
-            uint256 adjusted =
-                uint256(currentSqrtPrice) * (BPS_DENOMINATOR + priceImpactBps / 2) / BPS_DENOMINATOR;
+            uint256 adjusted = uint256(currentSqrtPrice) * (BPS_DENOMINATOR + priceImpactBps / 2) / BPS_DENOMINATOR;
             return adjusted >= TickMath.MAX_SQRT_RATIO ? uint160(TickMath.MAX_SQRT_RATIO - 1) : uint160(adjusted);
         } else {
             // Limit is lower price (buying pushes price down)
-            uint256 adjusted =
-                uint256(currentSqrtPrice) * (BPS_DENOMINATOR - priceImpactBps / 2) / BPS_DENOMINATOR;
+            uint256 adjusted = uint256(currentSqrtPrice) * (BPS_DENOMINATOR - priceImpactBps / 2) / BPS_DENOMINATOR;
             return adjusted <= TickMath.MIN_SQRT_RATIO ? uint160(TickMath.MIN_SQRT_RATIO + 1) : uint160(adjusted);
         }
     }
@@ -534,11 +530,11 @@ contract HiroSeason is Ownable, ReentrancyGuard {
 
         // Return HIRO per WETH (how much HIRO you get for 1 WETH)
         if (hiroIsToken0) {
-            return uint256(1e18) * (uint256(1) << 96) / uint256(sqrtPriceX96) * (uint256(1) << 96)
-                / uint256(sqrtPriceX96);
+            return
+                uint256(1e18) * (uint256(1) << 96) / uint256(sqrtPriceX96) * (uint256(1) << 96) / uint256(sqrtPriceX96);
         } else {
-            return uint256(1e18) * uint256(sqrtPriceX96) / (uint256(1) << 96) * uint256(sqrtPriceX96)
-                / (uint256(1) << 96);
+            return
+                uint256(1e18) * uint256(sqrtPriceX96) / (uint256(1) << 96) * uint256(sqrtPriceX96) / (uint256(1) << 96);
         }
     }
 

@@ -668,13 +668,11 @@ contract HiroSeasonTest is Test {
         return _concat(part1, _concat(part2, part3));
     }
 
-    function _buildRedemptionLog(
-        uint256 userId,
-        uint256 ethSpent,
-        uint256,
-        uint256 ethReceived,
-        int256 profitLoss
-    ) internal pure returns (string memory) {
+    function _buildRedemptionLog(uint256 userId, uint256 ethSpent, uint256, uint256 ethReceived, int256 profitLoss)
+        internal
+        pure
+        returns (string memory)
+    {
         string memory plStr;
         if (profitLoss >= 0) {
             plStr = _concat("+", _formatEth(uint256(profitLoss)));
@@ -1144,8 +1142,9 @@ contract HiroSeasonTest is Test {
         uint256 totalETHReceived = redeemer.balance - ethBefore;
 
         // Total ETH from two partial redemptions should match full amount within 1 wei rounding
-        uint256 diff =
-            totalETHReceived > expectedTotalETH ? totalETHReceived - expectedTotalETH : expectedTotalETH - totalETHReceived;
+        uint256 diff = totalETHReceived > expectedTotalETH
+            ? totalETHReceived - expectedTotalETH
+            : expectedTotalETH - totalETHReceived;
         assertTrue(diff <= 1, "Sequential redemptions should match full amount (within 1 wei)");
     }
 
@@ -1287,8 +1286,7 @@ contract HiroSeasonTest is Test {
         (bool sent,) = address(season).call{value: 2 ether}("");
         require(sent);
 
-        (uint256 available, uint256 expectedHiro, uint256 minHiroOut, uint160 sqrtPriceLimit) =
-            season.previewBuyback();
+        (uint256 available, uint256 expectedHiro, uint256 minHiroOut, uint160 sqrtPriceLimit) = season.previewBuyback();
         assertTrue(available > 0, "Should have available funds");
         assertTrue(expectedHiro > 0, "Expected HIRO should be > 0");
         assertTrue(minHiroOut > 0, "Min HIRO out should be > 0");
