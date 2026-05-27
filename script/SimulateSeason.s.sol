@@ -1,12 +1,11 @@
 // SPDX-License-Identifier: UNLICENSED
-pragma solidity =0.7.6;
-pragma abicoder v2;
+pragma solidity ^0.8.20;
 
 import {Script, console} from "lib/forge-std/src/Script.sol";
 import {HiroSeason} from "../src/HiroSeason.sol";
 import {HiroToken} from "../src/HiroToken.sol";
 import "lib/v3-periphery/contracts/interfaces/ISwapRouter.sol";
-import "lib/v3-periphery/contracts/interfaces/external/IWETH9.sol";
+import "../src/interfaces/IWETH9.sol";
 
 /// @title SimulateSeason
 /// @notice Full season simulation script for HiroSeason

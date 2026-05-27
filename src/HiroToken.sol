@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
-pragma solidity =0.7.6;
+pragma solidity ^0.8.20;
 
-import "lib/openzeppelin-contracts/contracts/token/ERC20/ERC20Burnable.sol";
+import "lib/openzeppelin-contracts/contracts/token/ERC20/extensions/ERC20Burnable.sol";
 
 /// @title HiroToken
 /// @notice Fixed-supply ERC20 token with burn capability for the Hiro seasonal token system

@@ -1,15 +1,13 @@
 // SPDX-License-Identifier: MIT
-pragma solidity =0.7.6;
-pragma abicoder v2;
+pragma solidity ^0.8.20;
 
 import "./HiroToken.sol";
+import "./libraries/TickMath.sol";
 import "lib/openzeppelin-contracts/contracts/access/Ownable.sol";
-import "lib/openzeppelin-contracts/contracts/utils/ReentrancyGuard.sol";
-import "lib/openzeppelin-contracts/contracts/math/SafeMath.sol";
-import "lib/v3-periphery/contracts/interfaces/INonfungiblePositionManager.sol";
-import "lib/v3-periphery/contracts/interfaces/external/IWETH9.sol";
+import "lib/openzeppelin-contracts/contracts/security/ReentrancyGuard.sol";
+import "./interfaces/INonfungiblePositionManager.sol";
+import "./interfaces/IWETH9.sol";
 import "lib/v3-core/contracts/interfaces/IUniswapV3Pool.sol";
-import "lib/v3-core/contracts/libraries/TickMath.sol";
 
 /// @dev SwapRouter02 interface (Base mainnet) - no deadline in struct
 interface ISwapRouter02 {
@@ -30,7 +28,23 @@ interface ISwapRouter02 {
 /// @notice Seasonal token system where HIRO tokens have a 30-day lifespan
 /// @dev At season end, all holders can redeem HIRO for pro-rata ETH. Owner cannot rug.
 contract HiroSeason is Ownable, ReentrancyGuard {
-    using SafeMath for uint256;
+    // ═══════════════════════════════════════════════════════════════════════════
+    // ERRORS
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    error InvalidState();
+    error PoolNotCreated();
+    error PoolAlreadyCreated();
+    error SeasonNotOver();
+    error GracePeriodNotOver();
+    error MustSendETH();
+    error MustRedeemPositive();
+    error NoHiroToRedeem();
+    error AmountTooSmall();
+    error NoWethForBuyback();
+    error EthTransferFailed();
+    error SlippageTooHigh();
+    error PriceImpactTooHigh();
 
     // ═══════════════════════════════════════════════════════════════════════════
     // ENUMS
@@ -137,14 +151,13 @@ contract HiroSeason is Ownable, ReentrancyGuard {
     /// @notice Deposit ETH to the protected redemption pool (wrapped to WETH)
     /// @dev Can be called in SETUP, ACTIVE, or ENDED states. Funds cannot be withdrawn.
     function fundRedemption() external payable {
-        require(
-            state == SeasonState.SETUP || state == SeasonState.ACTIVE || state == SeasonState.ENDED,
-            "Cannot fund in current state"
-        );
-        require(msg.value > 0, "Must send ETH");
+        if (state != SeasonState.SETUP && state != SeasonState.ACTIVE && state != SeasonState.ENDED) {
+            revert InvalidState();
+        }
+        if (msg.value == 0) revert MustSendETH();
 
         WETH.deposit{value: msg.value}();
-        redemptionPool = redemptionPool.add(msg.value);
+        redemptionPool += msg.value;
 
         emit RedemptionFunded(msg.sender, msg.value);
     }
@@ -152,8 +165,8 @@ contract HiroSeason is Ownable, ReentrancyGuard {
     /// @notice Create HIRO/WETH pool and deploy single-sided HIRO liquidity
     /// @dev Only owner, only in SETUP state
     function createPoolAndDeployLiquidity() external onlyOwner {
-        require(state == SeasonState.SETUP, "Not in SETUP state");
-        require(pool == address(0), "Pool already created");
+        if (state != SeasonState.SETUP) revert InvalidState();
+        if (pool != address(0)) revert PoolAlreadyCreated();
 
         // Determine token ordering and create pool
         hiroIsToken0 = address(hiroToken) < address(WETH);
@@ -238,8 +251,8 @@ contract HiroSeason is Ownable, ReentrancyGuard {
     /// @notice Start the 30-day season
     /// @dev Only owner, only in SETUP state, pool must exist
     function startSeason() external onlyOwner {
-        require(state == SeasonState.SETUP, "Not in SETUP state");
-        require(pool != address(0), "Pool not created");
+        if (state != SeasonState.SETUP) revert InvalidState();
+        if (pool == address(0)) revert PoolNotCreated();
 
         state = SeasonState.ACTIVE;
         seasonStartTime = block.timestamp;
@@ -250,7 +263,7 @@ contract HiroSeason is Ownable, ReentrancyGuard {
     /// @notice Collect accumulated LP fees (kept as WETH)
     /// @dev Anyone can call in ACTIVE or ENDED state
     function collectFees() external nonReentrant {
-        require(state == SeasonState.ACTIVE || state == SeasonState.ENDED, "Not in ACTIVE or ENDED state");
+        if (state != SeasonState.ACTIVE && state != SeasonState.ENDED) revert InvalidState();
 
         INonfungiblePositionManager.CollectParams memory params = INonfungiblePositionManager.CollectParams({
             tokenId: positionTokenId,
@@ -268,8 +281,8 @@ contract HiroSeason is Ownable, ReentrancyGuard {
     /// @param _slippageBps Slippage tolerance (100 = 1%)
     /// @param _priceImpactBps Price impact limit (200 = 2%)
     function setBuybackSettings(uint256 _slippageBps, uint256 _priceImpactBps) external onlyOwner {
-        require(_slippageBps <= MAX_BPS, "Slippage too high");
-        require(_priceImpactBps <= MAX_BPS, "Price impact too high");
+        if (_slippageBps > MAX_BPS) revert SlippageTooHigh();
+        if (_priceImpactBps > MAX_BPS) revert PriceImpactTooHigh();
 
         slippageBps = _slippageBps;
         priceImpactBps = _priceImpactBps;
@@ -288,8 +301,14 @@ contract HiroSeason is Ownable, ReentrancyGuard {
         secondsAgos[0] = TWAP_INTERVAL;
         secondsAgos[1] = 0;
         (int56[] memory tickCumulatives,) = IUniswapV3Pool(pool).observe(secondsAgos);
-        int56 tickDelta = tickCumulatives[1] - tickCumulatives[0];
-        int24 avgTick = int24(tickDelta / int56(uint56(TWAP_INTERVAL)));
+        // Uniswap V3 tickCumulatives are unbounded int56 accumulators that may have wrapped
+        // mod 2^56; the delta is what carries signal. Match upstream OracleLibrary which
+        // computes this in an unchecked block to preserve the 0.7.6 wrap-around semantics.
+        int24 avgTick;
+        unchecked {
+            int56 tickDelta = tickCumulatives[1] - tickCumulatives[0];
+            avgTick = int24(tickDelta / int56(uint56(TWAP_INTERVAL)));
+        }
         return TickMath.getSqrtRatioAtTick(avgTick);
     }
 
@@ -303,15 +322,13 @@ contract HiroSeason is Ownable, ReentrancyGuard {
         if (hiroIsToken0) {
             // HIRO=token0, WETH=token1. price = WETH/HIRO
             // HIRO = WETH * 2^192 / sqrtPrice^2
-            return wethAmount.mul(uint256(1) << 96).div(uint256(sqrtPriceX96)).mul(uint256(1) << 96).div(
-                uint256(sqrtPriceX96)
-            );
+            return wethAmount * (uint256(1) << 96) / uint256(sqrtPriceX96) * (uint256(1) << 96)
+                / uint256(sqrtPriceX96);
         } else {
             // WETH=token0, HIRO=token1. price = HIRO/WETH
             // HIRO = WETH * sqrtPrice^2 / 2^192
-            return wethAmount.mul(uint256(sqrtPriceX96)).div(uint256(1) << 96).mul(uint256(sqrtPriceX96)).div(
-                uint256(1) << 96
-            );
+            return wethAmount * uint256(sqrtPriceX96) / (uint256(1) << 96) * uint256(sqrtPriceX96)
+                / (uint256(1) << 96);
         }
     }
 
@@ -327,12 +344,12 @@ contract HiroSeason is Ownable, ReentrancyGuard {
         if (hiroIsToken0) {
             // Limit is higher price (buying pushes price up)
             uint256 adjusted =
-                uint256(currentSqrtPrice).mul(BPS_DENOMINATOR.add(priceImpactBps.div(2))).div(BPS_DENOMINATOR);
+                uint256(currentSqrtPrice) * (BPS_DENOMINATOR + priceImpactBps / 2) / BPS_DENOMINATOR;
             return adjusted >= TickMath.MAX_SQRT_RATIO ? uint160(TickMath.MAX_SQRT_RATIO - 1) : uint160(adjusted);
         } else {
             // Limit is lower price (buying pushes price down)
             uint256 adjusted =
-                uint256(currentSqrtPrice).mul(BPS_DENOMINATOR.sub(priceImpactBps.div(2))).div(BPS_DENOMINATOR);
+                uint256(currentSqrtPrice) * (BPS_DENOMINATOR - priceImpactBps / 2) / BPS_DENOMINATOR;
             return adjusted <= TickMath.MIN_SQRT_RATIO ? uint160(TickMath.MIN_SQRT_RATIO + 1) : uint160(adjusted);
         }
     }
@@ -340,15 +357,15 @@ contract HiroSeason is Ownable, ReentrancyGuard {
     /// @notice Execute a buyback: swap available WETH for HIRO
     /// @dev Only owner, only in ACTIVE state. Uses on-chain slippage/price impact settings.
     function executeBuyback() external onlyOwner nonReentrant {
-        require(state == SeasonState.ACTIVE, "Not in ACTIVE state");
+        if (state != SeasonState.ACTIVE) revert InvalidState();
 
-        uint256 available = WETH.balanceOf(address(this)).sub(redemptionPool);
-        require(available > 0, "No WETH available for buyback");
+        uint256 available = WETH.balanceOf(address(this)) - redemptionPool;
+        if (available == 0) revert NoWethForBuyback();
 
         // Calculate expected output and apply slippage
         uint256 expectedHiro = _calculateExpectedHiro(available);
-        uint256 expectedAfterFee = expectedHiro.mul(997).div(1000); // 0.3% pool fee
-        uint256 minHiroOut = expectedAfterFee.mul(BPS_DENOMINATOR.sub(slippageBps)).div(BPS_DENOMINATOR);
+        uint256 expectedAfterFee = expectedHiro * 997 / 1000; // 0.3% pool fee
+        uint256 minHiroOut = expectedAfterFee * (BPS_DENOMINATOR - slippageBps) / BPS_DENOMINATOR;
 
         // Calculate price impact limit
         uint160 sqrtPriceLimit = _calculatePriceLimit();
@@ -373,8 +390,8 @@ contract HiroSeason is Ownable, ReentrancyGuard {
     /// @notice End the season after 30 days
     /// @dev Anyone can call after SEASON_DURATION has passed
     function endSeason() external {
-        require(state == SeasonState.ACTIVE, "Not in ACTIVE state");
-        require(block.timestamp >= seasonStartTime + SEASON_DURATION, "Season not over");
+        if (state != SeasonState.ACTIVE) revert InvalidState();
+        if (block.timestamp < seasonStartTime + SEASON_DURATION) revert SeasonNotOver();
 
         state = SeasonState.ENDED;
 
@@ -385,12 +402,11 @@ contract HiroSeason is Ownable, ReentrancyGuard {
     /// @param minWethOut Minimum WETH to receive from LP withdrawal (slippage protection)
     /// @dev Anyone can call in ENDED state. Pass 0 for minWethOut if no slippage protection needed.
     function openRedemption(uint256 minWethOut) external nonReentrant {
-        require(state == SeasonState.ENDED, "Not in ENDED state");
+        if (state != SeasonState.ENDED) revert InvalidState();
         if (msg.sender != owner()) {
-            require(
-                block.timestamp >= seasonStartTime + SEASON_DURATION + REDEMPTION_GRACE_PERIOD,
-                "Grace period not over"
-            );
+            if (block.timestamp < seasonStartTime + SEASON_DURATION + REDEMPTION_GRACE_PERIOD) {
+                revert GracePeriodNotOver();
+            }
         }
 
         _withdrawLiquidity(minWethOut);
@@ -449,13 +465,13 @@ contract HiroSeason is Ownable, ReentrancyGuard {
     /// @param hiroAmount Amount of HIRO to redeem
     /// @dev Anyone with HIRO can call in REDEEMABLE state. Fixed rate for all.
     function redeem(uint256 hiroAmount) external nonReentrant {
-        require(state == SeasonState.REDEEMABLE, "Not in REDEEMABLE state");
-        require(hiroAmount > 0, "Must redeem > 0");
-        require(totalRedeemableHiro > 0, "No HIRO to redeem");
+        if (state != SeasonState.REDEEMABLE) revert InvalidState();
+        if (hiroAmount == 0) revert MustRedeemPositive();
+        if (totalRedeemableHiro == 0) revert NoHiroToRedeem();
 
         // Calculate amount owed: (hiroAmount / totalRedeemableHiro) * totalRedemptionWETH
-        uint256 amountOwed = hiroAmount.mul(totalRedemptionWETH).div(totalRedeemableHiro);
-        require(amountOwed > 0, "Amount too small");
+        uint256 amountOwed = hiroAmount * totalRedemptionWETH / totalRedeemableHiro;
+        if (amountOwed == 0) revert AmountTooSmall();
 
         // Burn user's HIRO (requires approval)
         hiroToken.burnFrom(msg.sender, hiroAmount);
@@ -463,7 +479,7 @@ contract HiroSeason is Ownable, ReentrancyGuard {
         // Unwrap WETH and send ETH to user
         WETH.withdraw(amountOwed);
         (bool success,) = msg.sender.call{value: amountOwed}("");
-        require(success, "ETH transfer failed");
+        if (!success) revert EthTransferFailed();
 
         emit Redeemed(msg.sender, hiroAmount, amountOwed);
     }
@@ -482,13 +498,13 @@ contract HiroSeason is Ownable, ReentrancyGuard {
     function availableForBuyback() external view returns (uint256) {
         uint256 balance = WETH.balanceOf(address(this));
         if (balance <= redemptionPool) return 0;
-        return balance.sub(redemptionPool);
+        return balance - redemptionPool;
     }
 
     /// @notice Calculate ETH amount for a given HIRO redemption
     function calculateRedemption(uint256 hiroAmount) external view returns (uint256) {
         if (state != SeasonState.REDEEMABLE || totalRedeemableHiro == 0) return 0;
-        return hiroAmount.mul(totalRedemptionWETH).div(totalRedeemableHiro);
+        return hiroAmount * totalRedemptionWETH / totalRedeemableHiro;
     }
 
     /// @notice Get current LP position liquidity (for calculating minWethOut off-chain)
@@ -502,12 +518,12 @@ contract HiroSeason is Ownable, ReentrancyGuard {
         view
         returns (uint256 available, uint256 expectedHiro, uint256 minHiroOut, uint160 sqrtPriceLimit)
     {
-        available = WETH.balanceOf(address(this)).sub(redemptionPool);
+        available = WETH.balanceOf(address(this)) - redemptionPool;
         if (available == 0 || pool == address(0)) return (0, 0, 0, 0);
 
         expectedHiro = _calculateExpectedHiro(available);
-        uint256 expectedAfterFee = expectedHiro.mul(997).div(1000);
-        minHiroOut = expectedAfterFee.mul(BPS_DENOMINATOR.sub(slippageBps)).div(BPS_DENOMINATOR);
+        uint256 expectedAfterFee = expectedHiro * 997 / 1000;
+        minHiroOut = expectedAfterFee * (BPS_DENOMINATOR - slippageBps) / BPS_DENOMINATOR;
         sqrtPriceLimit = _calculatePriceLimit();
     }
 
@@ -518,13 +534,11 @@ contract HiroSeason is Ownable, ReentrancyGuard {
 
         // Return HIRO per WETH (how much HIRO you get for 1 WETH)
         if (hiroIsToken0) {
-            return uint256(1e18).mul(uint256(1) << 96).div(uint256(sqrtPriceX96)).mul(uint256(1) << 96).div(
-                uint256(sqrtPriceX96)
-            );
+            return uint256(1e18) * (uint256(1) << 96) / uint256(sqrtPriceX96) * (uint256(1) << 96)
+                / uint256(sqrtPriceX96);
         } else {
-            return uint256(1e18).mul(uint256(sqrtPriceX96)).div(uint256(1) << 96).mul(uint256(sqrtPriceX96)).div(
-                uint256(1) << 96
-            );
+            return uint256(1e18) * uint256(sqrtPriceX96) / (uint256(1) << 96) * uint256(sqrtPriceX96)
+                / (uint256(1) << 96);
         }
     }
 

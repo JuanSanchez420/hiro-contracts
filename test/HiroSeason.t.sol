@@ -1,13 +1,12 @@
 // SPDX-License-Identifier: MIT
-pragma solidity =0.7.6;
-pragma abicoder v2;
+pragma solidity ^0.8.20;
 
 import {Test} from "forge-std/Test.sol";
 import {console} from "forge-std/console.sol";
 import {HiroSeason} from "../src/HiroSeason.sol";
 import {HiroToken} from "../src/HiroToken.sol";
-import "lib/v3-periphery/contracts/interfaces/external/IWETH9.sol";
-import "lib/v3-periphery/contracts/interfaces/INonfungiblePositionManager.sol";
+import "../src/interfaces/IWETH9.sol";
+import "../src/interfaces/INonfungiblePositionManager.sol";
 import "lib/v3-core/contracts/interfaces/IUniswapV3Pool.sol";
 
 // SwapRouter02 interface (different from ISwapRouter - no deadline in struct)
@@ -71,7 +70,7 @@ contract HiroSeasonTest is Test {
     }
 
     function testCannotStartBeforePoolCreated() public {
-        vm.expectRevert("Pool not created");
+        vm.expectRevert(HiroSeason.PoolNotCreated.selector);
         season.startSeason();
     }
 
@@ -80,7 +79,7 @@ contract HiroSeasonTest is Test {
         season.createPoolAndDeployLiquidity();
         season.startSeason();
 
-        vm.expectRevert("Season not over");
+        vm.expectRevert(HiroSeason.SeasonNotOver.selector);
         season.endSeason();
     }
 
@@ -88,7 +87,7 @@ contract HiroSeasonTest is Test {
         season.createPoolAndDeployLiquidity();
         season.startSeason();
 
-        vm.expectRevert("Not in REDEEMABLE state");
+        vm.expectRevert(HiroSeason.InvalidState.selector);
         season.redeem(1 ether);
     }
 
@@ -100,7 +99,7 @@ contract HiroSeasonTest is Test {
         assertEq(uint256(season.state()), uint256(HiroSeason.SeasonState.ACTIVE));
 
         // Cannot go back to SETUP
-        vm.expectRevert("Not in SETUP state");
+        vm.expectRevert(HiroSeason.InvalidState.selector);
         season.createPoolAndDeployLiquidity();
 
         // Fast forward past season duration
@@ -109,14 +108,14 @@ contract HiroSeasonTest is Test {
         assertEq(uint256(season.state()), uint256(HiroSeason.SeasonState.ENDED));
 
         // Cannot go back to ACTIVE
-        vm.expectRevert("Not in ACTIVE state");
+        vm.expectRevert(HiroSeason.InvalidState.selector);
         season.endSeason();
 
         season.openRedemption(0);
         assertEq(uint256(season.state()), uint256(HiroSeason.SeasonState.REDEEMABLE));
 
         // Cannot go back to ENDED
-        vm.expectRevert("Not in ENDED state");
+        vm.expectRevert(HiroSeason.InvalidState.selector);
         season.openRedemption(0);
     }
 
@@ -219,7 +218,7 @@ contract HiroSeasonTest is Test {
         season.startSeason();
 
         // Try buyback with no extra WETH
-        vm.expectRevert("No WETH available for buyback");
+        vm.expectRevert(HiroSeason.NoWethForBuyback.selector);
         season.executeBuyback();
 
         // Add extra WETH beyond redemption pool (send ETH which gets wrapped)
@@ -318,7 +317,7 @@ contract HiroSeasonTest is Test {
         season.endSeason();
         season.openRedemption(0);
 
-        vm.expectRevert("Cannot fund in current state");
+        vm.expectRevert(HiroSeason.InvalidState.selector);
         season.fundRedemption{value: 5 ether}();
     }
 
@@ -380,7 +379,7 @@ contract HiroSeasonTest is Test {
         season.endSeason();
         season.openRedemption(0);
 
-        vm.expectRevert("Must redeem > 0");
+        vm.expectRevert(HiroSeason.MustRedeemPositive.selector);
         season.redeem(0);
     }
 
@@ -392,7 +391,7 @@ contract HiroSeasonTest is Test {
         season.endSeason();
 
         // Second call should fail
-        vm.expectRevert("Not in ACTIVE state");
+        vm.expectRevert(HiroSeason.InvalidState.selector);
         season.endSeason();
     }
 
@@ -400,12 +399,12 @@ contract HiroSeasonTest is Test {
         season.createPoolAndDeployLiquidity();
 
         // Second call should fail
-        vm.expectRevert("Pool already created");
+        vm.expectRevert(HiroSeason.PoolAlreadyCreated.selector);
         season.createPoolAndDeployLiquidity();
     }
 
     function testFundRedemptionWithZeroValueReverts() public {
-        vm.expectRevert("Must send ETH");
+        vm.expectRevert(HiroSeason.MustSendETH.selector);
         season.fundRedemption{value: 0}();
     }
 
@@ -480,7 +479,7 @@ contract HiroSeasonTest is Test {
         // No extra WETH beyond redemption pool
         assertEq(season.availableForBuyback(), 0);
 
-        vm.expectRevert("No WETH available for buyback");
+        vm.expectRevert(HiroSeason.NoWethForBuyback.selector);
         season.executeBuyback();
     }
 
@@ -886,7 +885,7 @@ contract HiroSeasonTest is Test {
     }
 
     function testCollectFeesRevertsInSetupState() public {
-        vm.expectRevert("Not in ACTIVE or ENDED state");
+        vm.expectRevert(HiroSeason.InvalidState.selector);
         season.collectFees();
     }
 
@@ -899,7 +898,7 @@ contract HiroSeasonTest is Test {
         season.endSeason();
         season.openRedemption(0);
 
-        vm.expectRevert("Not in ACTIVE or ENDED state");
+        vm.expectRevert(HiroSeason.InvalidState.selector);
         season.collectFees();
     }
 
@@ -952,7 +951,7 @@ contract HiroSeasonTest is Test {
 
         // Non-owner reverts during grace period
         vm.prank(users[0]);
-        vm.expectRevert("Grace period not over");
+        vm.expectRevert(HiroSeason.GracePeriodNotOver.selector);
         season.openRedemption(0);
     }
 
@@ -1170,10 +1169,10 @@ contract HiroSeasonTest is Test {
     }
 
     function testSetBuybackSettingsExceedsMaxBpsReverts() public {
-        vm.expectRevert("Slippage too high");
+        vm.expectRevert(HiroSeason.SlippageTooHigh.selector);
         season.setBuybackSettings(1001, 200);
 
-        vm.expectRevert("Price impact too high");
+        vm.expectRevert(HiroSeason.PriceImpactTooHigh.selector);
         season.setBuybackSettings(200, 1001);
     }
 

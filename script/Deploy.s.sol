@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: UNLICENSED
-pragma solidity =0.7.6;
-pragma abicoder v2;
+pragma solidity ^0.8.20;
 
 import {Script, console} from "lib/forge-std/src/Script.sol";
 import {HiroFactory} from "../src/HiroFactory.sol";

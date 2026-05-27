@@ -1,15 +1,12 @@
 // SPDX-License-Identifier: MIT
-pragma solidity =0.7.6;
-pragma abicoder v2;
+pragma solidity ^0.8.20;
 
 import "./interfaces/IHiroFactory.sol";
 import "lib/openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
-import "lib/openzeppelin-contracts/contracts/token/ERC20/SafeERC20.sol";
-import "lib/openzeppelin-contracts/contracts/utils/ReentrancyGuard.sol";
-import "lib/openzeppelin-contracts/contracts/math/SafeMath.sol";
+import "lib/openzeppelin-contracts/contracts/token/ERC20/utils/SafeERC20.sol";
+import "lib/openzeppelin-contracts/contracts/security/ReentrancyGuard.sol";
 
 contract HiroWallet is ReentrancyGuard {
-    using SafeMath for uint256;
     using SafeERC20 for IERC20;
 
     address public immutable owner;
@@ -56,7 +53,7 @@ contract HiroWallet is ReentrancyGuard {
 
         uint256 totalEth;
         for (uint256 i = 0; i < length; i++) {
-            totalEth = totalEth.add(ethAmounts[i]);
+            totalEth += ethAmounts[i];
         }
         require(totalEth <= address(this).balance, "Not enough ETH on wallet");
 

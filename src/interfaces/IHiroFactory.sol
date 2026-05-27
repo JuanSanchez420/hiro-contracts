@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity =0.7.6;
+pragma solidity ^0.8.20;
 
 abstract contract IHiroFactory {
     function ownerToWallet(address) external view virtual returns (address);
