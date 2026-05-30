@@ -60,7 +60,12 @@ extractable.
 
 **Opt-in**: implicit via pre-approvals. Positions created through Hiro have approvals to NPM and SwapRouter pre-set during the user-signed mint flow. Strategies operate on positions where those approvals exist; positions without them simply fail their swap/mint calls.
 
-## Phase 1 — Infrastructure (Factory + Wallet + IStrategy)
+## Phase 1 — Infrastructure (Factory + Wallet + IStrategy) — ✅ DONE
+
+Shipped: `agentWhitelist`/`strategyWhitelist` + add/remove on `src/HiroFactory.sol`,
+`executeStrategy` on `src/HiroWallet.sol`, `src/interfaces/IStrategy.sol` +
+`src/interfaces/IHiroWallet.sol`, `test/mocks/NoopStrategy.sol`, with coverage in
+`test/HiroFactory.t.sol` / `test/HiroWallet.t.sol`.
 
 **Goal:** add the strategy/agent whitelist and `executeStrategy` entry without changing rebalance behavior. End of phase: a no-op test strategy can be deployed, whitelisted, and invoked.
 
@@ -81,7 +86,10 @@ Sanity contracts in the wallet:
 2. `forge test` — all 88 existing tests pass + new tests for agent/strategy whitelist and `executeStrategy` with `NoopStrategy`
 3. `make fork` + local deploy + cast call to add a noop strategy + invoke it via an agent EOA — confirm event emission and revert paths
 
-## Phase 2 — UniV3 Rebalance Strategy
+## Phase 2 — UniV3 Rebalance Strategy — ✅ DONE
+
+Shipped: `src/strategies/UniV3RebalanceStrategy.sol` + `src/libraries/V3MathLib.sol`,
+with unit + Base-fork coverage in `test/strategies/UniV3RebalanceStrategy.t.sol`.
 
 **Goal:** replicate today's `rebalanceExecutor.ts` flow as a strategy contract. Agent passes `(positionId, newTickLower, newTickUpper, slippageBps, maxImpactBps)`. The strategy reads on-chain state, computes expected amounts, returns the Call[] sequence.
 
@@ -116,7 +124,7 @@ Pool/router lookup: strategy holds immutable refs to NPM and SwapRouter02; the p
 3. **Fork test** (`make fork`): deploy factory + wallet + strategy, fund with WETH/USDC, mint a V3 position, call `executeStrategy` with a new range, assert: NFT burned, new NFT minted with new range, protocol fee landed at factory, slippage and impact bounds enforced (negative test with too-tight slippage reverts as expected)
 4. Cross-check: total wallet value (oracle) before vs after stays within `slippageBps + maxImpactBps + fee`
 
-## Phase 3 — UniV3 AutoCompound Strategy
+## Phase 3 — UniV3 AutoCompound Strategy — 🚧 IN PROGRESS (this branch)
 
 **Goal:** collect fees on an existing position, swap to its current ratio, and re-deposit via `increaseLiquidity` — same range, same NFT. Agent passes `(positionId, slippageBps, maxImpactBps)`.
 
@@ -129,7 +137,15 @@ Strategy `plan()` builds:
 
 1. `NPM.collect(positionId, recipient=factory, ...)` — 10% of fees to HiroFactory (preserves existing protocol-fee economics)
 2. `NPM.collect(positionId, recipient=wallet, ...)` — 90% remainder
-3. **On-chain sanity floor**: revert in `plan()` if the wallet-bound 90% portion (computed via fee-growth math from `IUniswapV3Pool` tick states + `positions().feeGrowthInside*LastX128`) is below `MIN_COMPOUND_NOTIONAL` (denominated against the position's token0/token1 — e.g., $5 worth using the position's spot tick). This is the "agent-decided with on-chain sanity floor" model.
+3. **On-chain sanity floor**: revert in `plan()` if the wallet-bound 90% portion is too
+   small to be worth compounding. The uncollected fees are computed via fee-growth math
+   from `IUniswapV3Pool` tick states + `positions().feeGrowthInside*LastX128` (because
+   auto-compound never `decreaseLiquidity`-pokes, `positions().tokensOwed*` undercounts).
+   The floor is **relative, not a USD constant**: the wallet-bound fees must be at least
+   `MIN_COMPOUND_BPS` (≈1%) of the position's current principal, with both fees and
+   principal valued in the position's own tokens at the pool spot price — **no oracle, no
+   per-pool constant**. This keeps the strategy pool-agnostic. This is the
+   "agent-decided with on-chain sanity floor" model.
 4. `SwapRouter02.exactInputSingle(...)` — balance the two-sided amount for the position's existing range at current tick
 5. `NPM.increaseLiquidity(positionId, amount0Desired, amount1Desired, amount0Min, amount1Min, deadline)` — `amount0Min/1Min` via slippage bps
 
@@ -141,7 +157,11 @@ Hard caps mirror Phase 2 (`slippageBps <= 100`, `maxImpactBps <= 300`). No on-ch
 3. **Fork test**: mint a position on the fork, simulate fee accrual by routing swaps through the pool (use vm.deal + impersonation of a large LP), call `executeStrategy(autoCompound, ...)`, assert: same NFT, increased liquidity, protocol-fee 10% at factory, sanity-floor revert when fees too small
 4. Confirm `MIN_COMPOUND_NOTIONAL` triggers correctly using oracle/spot at runtime
 
-## Phase 4 — Deployment Scripts + Production Deploy
+## Phase 4 — Deployment Scripts + Production Deploy — 🚧 IN PROGRESS (this branch)
+
+Note: `whitelist.json` already contains NPM (`0x03a5…34f1`), SwapRouter02
+(`0x2626…e481`), WETH (`0x4200…0006`), and USDC (`0x8335…2913`), so the factory
+`targetWhitelist` already covers the strategy call targets — no whitelist change needed.
 
 Critical files:
 - `script/DeployStrategies.s.sol` (new) — deploys `UniV3RebalanceStrategy` and `UniV3AutoCompoundStrategy` with the right NPM/SwapRouter/V3Factory addresses; emits whitelisting calls (or just logs the address for an owner-side tx)
@@ -158,7 +178,7 @@ Targets to add to `whitelist.json` if not already present (verify during Phase 1
 2. Dry-run `forge script DeployStrategies --rpc-url base --fork-url $BASE_RPC` to confirm artifact paths and verification metadata
 3. Production deploy is a separate, gated step — not part of this plan
 
-## Phase 5 — API Integration
+## Phase 5 — API Integration — ⬜ TODO (`hiro-api`)
 
 **Goal:** replace the API's call-orchestration logic with a single `executeStrategy` invocation per skill. The off-chain Donchian/range-recommendation code stays — it just produces the params now instead of orchestrating calls.
 
@@ -178,13 +198,13 @@ Critical files (in `hiro-api/`):
 
 Each phase must pass before the next starts:
 
-| Phase | Build | Unit tests | Fork test |
-|---|---|---|---|
-| 1 | `forge build` | `forge test` (88 existing + new) | Whitelist + noop `executeStrategy` |
-| 2 | `forge build` | rebalance unit tests | Full rebalance on Base fork, WETH/USDC, with negative slippage/impact cases |
-| 3 | `forge build` | compound unit tests | Compound with simulated fee accrual; sanity-floor revert |
-| 4 | `forge build` | scripts compile | `make deploy && make deploy-strategies` round-trip on fork |
-| 5 | `npm run build` (api) | api unit tests | End-to-end rebalance + compound from API → fork |
+| Phase | Status | Build | Unit tests | Fork test |
+|---|---|---|---|---|
+| 1 | ✅ DONE | `forge build` | `forge test` (88 existing + new) | Whitelist + noop `executeStrategy` |
+| 2 | ✅ DONE | `forge build` | rebalance unit tests | Full rebalance on Base fork, WETH/USDC, with negative slippage/impact cases |
+| 3 | 🚧 | `forge build` | compound unit tests | Compound with simulated fee accrual; sanity-floor revert |
+| 4 | 🚧 | `forge build` | scripts compile | `make deploy && make deploy-strategies` round-trip on fork |
+| 5 | ⬜ | `npm run build` (api) | api unit tests | End-to-end rebalance + compound from API → fork |
 
 Final acceptance: a tracked position on a forked Base mainnet can be (a) rebalanced and (b) auto-compounded purely through the new strategy path, with protocol fees landing at the factory and all old test cases still green.
 

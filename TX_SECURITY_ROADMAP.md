@@ -1,5 +1,14 @@
 # TX_SECURITY_ROADMAP.md — From Hot Agent Keys to Owner-Signed Execution
 
+## Status (as of branch `solidity-0820-upgrade`)
+
+The **contract layer is built and tested**: Phases 1–2 (HiroWallet v2 + HiroFactory
+v2) are implemented in `src/HiroWallet.sol` / `src/HiroFactory.sol` with full coverage
+in `test/HiroWallet.t.sol` / `test/HiroFactory.t.sol`. The old global `agents` mapping
+and `execute(targets,data,eth)` surface are gone. Remaining work is **off-chain**
+(Phase 3 API in `hiro-api`, Phase 4 frontend in `hiro-frontend`) plus the final
+test/audit/deploy phases. Per-phase status is in the [Sequencing](#sequencing) table.
+
 ## Background
 
 Today, `HiroWallet.execute()` checks only that `msg.sender` is registered in
@@ -422,14 +431,14 @@ The confirmation UX should not gain a noticeable extra step. Press
 
 ## Sequencing
 
-| Phase | What | Why this order |
-|---|---|---|
-| 1 | HiroWallet v2: `executeWithOwnerSig`, `executeAsOwner`, OZ `SignatureChecker`, bitmap nonces, `invalidateNonce`, full test coverage | Signature layer is load-bearing. |
-| 2 | HiroFactory v2: `paused`, `targetWhitelist`, multisig admin, immediate pause/unpause | Mutable registry that the wallet calls into. |
-| 3 | API: per-skill `Proposal` return shape, nonce allocator, `signedBundles` collection, bundle simulator surfacing approval calls and outbound transfers, relayer pool repurposed to gas-pay only | Backend produces signable bundles; operational defense lives here. |
-| 4 | Frontend: `lib/typedData.ts`, `SSESignatureRequiredEvent` wiring, `useSignTypedData` in `ConfirmationCard`, chain enforcement, self-submit toggle, approval-call call-out in the confirmation card | UX end-to-end. |
-| 5 | E2E tests on Base fork, Slither pass, audit window on wallet + factory | Verify before deploy. |
-| 6 | Deploy v2 factory + v2 wallet impl + admin multisig to Base. Deprecate v1 factory. | Ship. |
+| Phase | Status | What | Why this order |
+|---|---|---|---|
+| 1 | ✅ DONE | HiroWallet v2: `executeWithOwnerSig`, `executeAsOwner`, OZ `SignatureChecker`, bitmap nonces, `invalidateNonce`, full test coverage | Signature layer is load-bearing. |
+| 2 | ✅ DONE | HiroFactory v2: `paused`, `targetWhitelist`, multisig admin, immediate pause/unpause | Mutable registry that the wallet calls into. |
+| 3 | 🚧 IN PROGRESS (`hiro-api`) | API: per-skill `Proposal` return shape, nonce allocator, `signedBundles` collection, bundle simulator surfacing approval calls and outbound transfers, relayer pool repurposed to gas-pay only | Backend produces signable bundles; operational defense lives here. |
+| 4 | ⬜ TODO (`hiro-frontend`) | Frontend: `lib/typedData.ts`, `SSESignatureRequiredEvent` wiring, `useSignTypedData` in `ConfirmationCard`, chain enforcement, self-submit toggle, approval-call call-out in the confirmation card | UX end-to-end. |
+| 5 | ⬜ TODO | E2E tests on Base fork, Slither pass, audit window on wallet + factory | Verify before deploy. |
+| 6 | ⬜ TODO | Deploy v2 factory + v2 wallet impl + admin multisig to Base. Deprecate v1 factory. | Ship. |
 
 ## Out of scope
 

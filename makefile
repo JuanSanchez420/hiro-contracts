@@ -37,5 +37,12 @@ deploy-base:
 deploy-season:
 	forge script script/DeployHiroSeason.s.sol:DeployHiroSeason --rpc-url $(BASE_RPC) --chain-id 8453 --broadcast --account $(ACCOUNT) --verify --etherscan-api-key $(ETHERSCAN_API_KEY)
 
+# Strategies deploy against an existing factory: set HIRO_FACTORY=<addr> (optionally MIN_COMPOUND_BPS, default 100).
+deploy-strategies:
+	forge script script/DeployStrategies.s.sol:DeployStrategies --fork-url $(ANVIL_URL) --chain-id $(CHAIN_ID) --broadcast --unlocked --sender $(SENDER)
+
+deploy-strategies-base:
+	forge script script/DeployStrategies.s.sol:DeployStrategies --rpc-url $(BASE_RPC) --chain-id 8453 --broadcast --account $(ACCOUNT) --verify --etherscan-api-key $(ETHERSCAN_API_KEY)
+
 import-key:
 	cast wallet import $(ACCOUNT) --interactive

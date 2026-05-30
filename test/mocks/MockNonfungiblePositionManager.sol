@@ -19,6 +19,8 @@ contract MockNonfungiblePositionManager {
 
     mapping(uint256 => Position) public storedPositions;
     mapping(uint256 => address) public storedOwners;
+    mapping(uint256 => uint256) public feeGrowthInside0Last;
+    mapping(uint256 => uint256) public feeGrowthInside1Last;
 
     function setPosition(
         uint256 tokenId,
@@ -47,6 +49,11 @@ contract MockNonfungiblePositionManager {
         storedOwners[tokenId] = owner;
     }
 
+    function setFeeGrowthInsideLast(uint256 tokenId, uint256 fg0Last, uint256 fg1Last) external {
+        feeGrowthInside0Last[tokenId] = fg0Last;
+        feeGrowthInside1Last[tokenId] = fg1Last;
+    }
+
     function positions(uint256 tokenId)
         external
         view
@@ -65,21 +72,20 @@ contract MockNonfungiblePositionManager {
             uint128 tokensOwed1
         )
     {
+        // Named returns (assigned incrementally) avoid a 12-value tuple expression that
+        // would otherwise blow the stack once the fee-growth mapping reads are added.
         Position memory pos = storedPositions[tokenId];
-        return (
-            0,
-            address(0),
-            pos.token0,
-            pos.token1,
-            pos.fee,
-            pos.tickLower,
-            pos.tickUpper,
-            pos.liquidity,
-            0,
-            0,
-            pos.tokensOwed0,
-            pos.tokensOwed1
-        );
+        token0 = pos.token0;
+        token1 = pos.token1;
+        fee = pos.fee;
+        tickLower = pos.tickLower;
+        tickUpper = pos.tickUpper;
+        liquidity = pos.liquidity;
+        feeGrowthInside0LastX128 = feeGrowthInside0Last[tokenId];
+        feeGrowthInside1LastX128 = feeGrowthInside1Last[tokenId];
+        tokensOwed0 = pos.tokensOwed0;
+        tokensOwed1 = pos.tokensOwed1;
+        // nonce, operator stay zero
     }
 
     function ownerOf(uint256 tokenId) external view returns (address) {
