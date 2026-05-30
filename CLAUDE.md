@@ -34,12 +34,28 @@ The old global `agents` mapping and `execute(targets,data,eth)` surface are
 **gone**. This intentionally breaks the API/frontend until they migrate to the
 signed-bundle flow — remaining phases are tracked in `TX_SECURITY_ROADMAP.md`.
 
-**Strategy module system (in progress):** to restore *bounded* autonomy for
+**Strategy module system:** to restore *bounded* autonomy for
 agents (e.g. Uniswap V3 LP rebalancing whose params depend on live state), the
 factory gains `agentWhitelist`/`strategyWhitelist` and the wallet a generic
 `executeStrategy(strategy, params)` entry. A whitelisted agent triggers a
 whitelisted strategy whose `plan()` (a view fn) returns the `Call[]`; every call
-still passes `factory.validateCall`. See `EXTENSIBLE.md`.
+still passes `factory.validateCall`. Shipped strategies live in `src/strategies/`
+(`UniV3RebalanceStrategy`, `UniV3AutoCompoundStrategy`).
+
+**Per-wallet strategy opt-in (mass-drain firewall):** `executeStrategy` also
+requires the wallet owner to have opted the strategy in via
+`HiroWallet.setStrategy(strategy, true)` (`enabledStrategies` mapping) — the
+factory `strategyWhitelist` is "globally permitted to exist", the per-wallet
+opt-in is "I authorize this strategy against *my* funds". Both must hold. This
+keeps the en-masse-drain invariant intact even against a **compromised factory
+key**: such a key controls both global whitelists, but a strategy it registers
+has zero per-wallet opt-ins, so it can move no user's funds. Opt-in is gasless —
+the owner signs a bundle `[setStrategy(strat, true)]` relayed through
+`executeWithOwnerSig`. The wallet's `_execute(calls, allowSelf)` permits a wallet
+self-call (so the bundle reaches `setStrategy` without whitelisting the wallet)
+**only** on owner-authorized paths; `executeStrategy` runs with `allowSelf=false`,
+so a strategy's `plan()` can never target the wallet itself. Pause is still
+enforced on self-calls.
 
 ### HiroSeason + HiroToken (Seasonal)
 30-day token seasons with guaranteed redemption:

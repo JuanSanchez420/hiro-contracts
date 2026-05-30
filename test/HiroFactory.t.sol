@@ -226,6 +226,15 @@ contract HiroFactoryTest is Test {
         hiroFactory.validateCall(address(hiroFactory));
     }
 
+    // A wallet self-call (caller == target) is NOT carved out at the factory: that decision now
+    // lives in HiroWallet._execute(allowSelf), so the factory treats an arbitrary caller's own
+    // address like any other non-whitelisted target.
+    function testValidateCall_callerCallingItself_notWhitelisted_reverts() public {
+        assertFalse(hiroFactory.targetWhitelist(address(this)));
+        vm.expectRevert(HiroFactory.TargetNotWhitelisted.selector);
+        hiroFactory.validateCall(address(this));
+    }
+
     // ==================== pause / unpause TESTS ====================
 
     function testPause_emitsAndSetsFlag() public {

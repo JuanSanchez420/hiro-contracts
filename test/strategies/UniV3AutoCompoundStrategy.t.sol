@@ -281,6 +281,8 @@ contract UniV3AutoCompoundStrategyForkTest is Test {
         hiroFactory.addStrategy(address(strategy));
         hiroFactory.addStrategy(address(strictStrategy));
         hiroFactory.addAgent(agent);
+        hiroWallet.setStrategy(address(strategy), true);
+        hiroWallet.setStrategy(address(strictStrategy), true);
         vm.stopPrank();
 
         positionId = _mintPositionIntoWallet();

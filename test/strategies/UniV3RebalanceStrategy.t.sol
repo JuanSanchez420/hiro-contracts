@@ -174,6 +174,7 @@ contract UniV3RebalanceStrategyForkTest is Test {
         vm.startPrank(user);
         hiroFactory.addStrategy(address(strategy));
         hiroFactory.addAgent(agent);
+        hiroWallet.setStrategy(address(strategy), true);
         vm.stopPrank();
 
         positionId = _mintPositionIntoWallet();

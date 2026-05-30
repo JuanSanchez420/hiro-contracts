@@ -801,6 +801,11 @@ contract TestHiroWallet is Test {
         hiroFactory.addStrategy(s);
     }
 
+    function _enableStrategy(address s) internal {
+        vm.prank(user);
+        hiroWallet.setStrategy(s, true);
+    }
+
     function _encodeNoopCall(address target, bytes memory data, uint256 value) internal pure returns (bytes memory) {
         return abi.encode(target, data, value);
     }
@@ -810,6 +815,7 @@ contract TestHiroWallet is Test {
         _addTarget(address(mock));
         NoopStrategy strat = new NoopStrategy();
         _addStrategy(address(strat));
+        _enableStrategy(address(strat));
         _addAgent(relayer);
 
         bytes memory params =
@@ -829,6 +835,7 @@ contract TestHiroWallet is Test {
         _addTarget(address(mock));
         NoopStrategy strat = new NoopStrategy();
         _addStrategy(address(strat));
+        _enableStrategy(address(strat));
         _addAgent(relayer);
 
         bytes memory params = _encodeNoopCall(address(mock), "", 0.1 ether);
@@ -874,6 +881,7 @@ contract TestHiroWallet is Test {
         // mock NOT whitelisted
         NoopStrategy strat = new NoopStrategy();
         _addStrategy(address(strat));
+        _enableStrategy(address(strat));
         _addAgent(relayer);
 
         bytes memory params =
@@ -887,6 +895,7 @@ contract TestHiroWallet is Test {
     function testExecuteStrategy_emptyCallsFromPlan_reverts() public {
         NoopStrategy strat = new NoopStrategy();
         _addStrategy(address(strat));
+        _enableStrategy(address(strat));
         _addAgent(relayer);
 
         vm.prank(relayer);
@@ -899,6 +908,7 @@ contract TestHiroWallet is Test {
         _addTarget(address(mock));
         NoopStrategy strat = new NoopStrategy();
         _addStrategy(address(strat));
+        _enableStrategy(address(strat));
         _addAgent(relayer);
 
         bytes memory params = _encodeNoopCall(address(mock), "", 100 ether);
@@ -914,6 +924,7 @@ contract TestHiroWallet is Test {
         mock.setRevert(true);
         NoopStrategy strat = new NoopStrategy();
         _addStrategy(address(strat));
+        _enableStrategy(address(strat));
         _addAgent(relayer);
 
         bytes memory params =
@@ -929,6 +940,7 @@ contract TestHiroWallet is Test {
         _addTarget(address(mock));
         NoopStrategy strat = new NoopStrategy();
         _addStrategy(address(strat));
+        _enableStrategy(address(strat));
         _addAgent(relayer);
 
         bytes memory params =
@@ -938,5 +950,203 @@ contract TestHiroWallet is Test {
         hiroWallet.executeStrategy(strat, params);
 
         assertFalse(hiroWallet.isNonceUsed(1));
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // setStrategy — per-wallet opt-in (mass-drain firewall)
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    event StrategyEnabled(address indexed strategy, bool enabled);
+
+    /// @dev Core property: a strategy that is on the factory's global whitelist AND invoked by a
+    /// whitelisted agent still cannot run unless this wallet's owner opted in. This is exactly the
+    /// scenario of a compromised factory key (it controls both whitelists) — it cannot drain.
+    function testExecuteStrategy_whitelistedButNotEnabled_reverts() public {
+        MockContract mock = new MockContract();
+        _addTarget(address(mock));
+        NoopStrategy strat = new NoopStrategy();
+        _addStrategy(address(strat)); // global strategy whitelist (factory owner)
+        _addAgent(relayer); // global agent whitelist (factory owner)
+        // NOTE: wallet owner never called setStrategy.
+
+        bytes memory params =
+            _encodeNoopCall(address(mock), abi.encodeWithSelector(MockContract.setValue.selector, 7), 0);
+
+        vm.prank(relayer);
+        vm.expectRevert(HiroWallet.StrategyNotEnabled.selector);
+        hiroWallet.executeStrategy(strat, params);
+
+        assertEq(mock.value(), 0);
+    }
+
+    /// @dev A compromised factory key registers a malicious strategy + agent and tries to sweep a
+    /// token out of a wallet that never opted in. The opt-in firewall stops it; funds are intact.
+    function testExecuteStrategy_compromisedFactoryCannotDrain() public {
+        address attacker = address(0xDEAD);
+        mockToken.mint(address(hiroWallet), 1_000 ether);
+        _addTarget(address(mockToken)); // token is a normal whitelisted target
+
+        NoopStrategy evil = new NoopStrategy();
+        _addStrategy(address(evil)); // attacker (factory owner) whitelists malicious strategy
+        _addAgent(attacker); // ...and a malicious agent
+
+        // Strategy plan = transfer the wallet's entire token balance to the attacker.
+        bytes memory drainCall = _encodeNoopCall(
+            address(mockToken), abi.encodeWithSelector(IERC20.transfer.selector, attacker, 1_000 ether), 0
+        );
+
+        vm.prank(attacker);
+        vm.expectRevert(HiroWallet.StrategyNotEnabled.selector);
+        hiroWallet.executeStrategy(evil, drainCall);
+
+        assertEq(mockToken.balanceOf(address(hiroWallet)), 1_000 ether);
+        assertEq(mockToken.balanceOf(attacker), 0);
+    }
+
+    function testSetStrategy_ownerEnablesAndDisables() public {
+        address strat = address(0x57A7);
+
+        vm.expectEmit(true, false, false, true, address(hiroWallet));
+        emit StrategyEnabled(strat, true);
+        vm.prank(user);
+        hiroWallet.setStrategy(strat, true);
+        assertTrue(hiroWallet.enabledStrategies(strat));
+
+        vm.expectEmit(true, false, false, true, address(hiroWallet));
+        emit StrategyEnabled(strat, false);
+        vm.prank(user);
+        hiroWallet.setStrategy(strat, false);
+        assertFalse(hiroWallet.enabledStrategies(strat));
+    }
+
+    function testSetStrategy_nonOwner_reverts() public {
+        vm.prank(nonOwner);
+        vm.expectRevert(HiroWallet.NotOwnerOrSelf.selector);
+        hiroWallet.setStrategy(address(0x57A7), true);
+    }
+
+    function testSetStrategy_agentCannotEnable_reverts() public {
+        _addAgent(relayer);
+        vm.prank(relayer);
+        vm.expectRevert(HiroWallet.NotOwnerOrSelf.selector);
+        hiroWallet.setStrategy(address(0x57A7), true);
+    }
+
+    /// @dev Gasless opt-in: the owner signs a bundle that calls the wallet's own setStrategy, and
+    /// any relayer submits it via executeWithOwnerSig (an owner-authorized path, so _execute runs
+    /// with allowSelf=true). The strategy then runs. No new EIP-712 machinery — reuses the existing
+    /// signed-bundle path.
+    function testSetStrategy_gaslessViaOwnerSig() public {
+        MockContract mock = new MockContract();
+        _addTarget(address(mock));
+        NoopStrategy strat = new NoopStrategy();
+        _addStrategy(address(strat));
+        _addAgent(relayer);
+
+        // Owner signs: [ wallet.setStrategy(strat, true) ]
+        IHiroWallet.Call[] memory calls = _singleCall(
+            address(hiroWallet), abi.encodeWithSelector(hiroWallet.setStrategy.selector, address(strat), true), 0
+        );
+        uint256 deadline = block.timestamp + 1 hours;
+        bytes memory sig = _sign(ownerPk, _digest(calls, 1, deadline));
+
+        assertFalse(hiroWallet.enabledStrategies(address(strat)));
+        vm.prank(relayer); // relayer pays gas, not the owner
+        hiroWallet.executeWithOwnerSig(calls, 1, deadline, sig);
+        assertTrue(hiroWallet.enabledStrategies(address(strat)));
+
+        // Now the agent can execute the opted-in strategy.
+        bytes memory params =
+            _encodeNoopCall(address(mock), abi.encodeWithSelector(MockContract.setValue.selector, 42), 0);
+        vm.prank(relayer);
+        hiroWallet.executeStrategy(strat, params);
+        assertEq(mock.value(), 42);
+    }
+
+    /// @dev Opt-in is revocable: once disabled, the agent can no longer run the strategy.
+    function testExecuteStrategy_disabledAfterEnable_reverts() public {
+        MockContract mock = new MockContract();
+        _addTarget(address(mock));
+        NoopStrategy strat = new NoopStrategy();
+        _addStrategy(address(strat));
+        _enableStrategy(address(strat));
+        _addAgent(relayer);
+
+        bytes memory params =
+            _encodeNoopCall(address(mock), abi.encodeWithSelector(MockContract.setValue.selector, 7), 0);
+
+        vm.prank(relayer);
+        hiroWallet.executeStrategy(strat, params);
+        assertEq(mock.value(), 7);
+
+        // Owner revokes.
+        vm.prank(user);
+        hiroWallet.setStrategy(address(strat), false);
+
+        vm.prank(relayer);
+        vm.expectRevert(HiroWallet.StrategyNotEnabled.selector);
+        hiroWallet.executeStrategy(strat, params);
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // Self-call scoping: strategy output may never target the wallet itself
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /// @dev Core regression test. The wallet self-call carve-out is owner-authorized only. An
+    /// enabled strategy whose plan() returns a self-call to setStrategy must NOT be able to
+    /// escalate by enabling other strategies — executeStrategy runs _execute(allowSelf=false).
+    function testExecuteStrategy_selfCall_reverts() public {
+        address otherStrat = address(0x07E2);
+        NoopStrategy strat = new NoopStrategy();
+        _addStrategy(address(strat));
+        _enableStrategy(address(strat));
+        _addAgent(relayer);
+
+        // plan() = [ wallet.setStrategy(otherStrat, true) ] — a self-call.
+        bytes memory params = _encodeNoopCall(
+            address(hiroWallet), abi.encodeWithSelector(hiroWallet.setStrategy.selector, otherStrat, true), 0
+        );
+
+        vm.prank(relayer);
+        vm.expectRevert(HiroWallet.SelfCallNotAllowed.selector);
+        hiroWallet.executeStrategy(strat, params);
+
+        // No privilege escalation: the self-targeted setStrategy never ran.
+        assertFalse(hiroWallet.enabledStrategies(otherStrat));
+    }
+
+    /// @dev Positive control for the owner-authorized self-call path via executeAsOwner
+    /// (allowSelf=true). The gasless test covers executeWithOwnerSig; this covers the direct path.
+    function testExecuteAsOwner_selfCall_setStrategy() public {
+        address strat = address(0x57A7);
+
+        IHiroWallet.Call[] memory calls =
+            _singleCall(address(hiroWallet), abi.encodeWithSelector(hiroWallet.setStrategy.selector, strat, true), 0);
+
+        assertFalse(hiroWallet.enabledStrategies(strat));
+        vm.prank(user);
+        hiroWallet.executeAsOwner(calls);
+        assertTrue(hiroWallet.enabledStrategies(strat));
+    }
+
+    /// @dev Pause parity: a paused factory still blocks an owner-signed self-call bundle. The
+    /// self-call branch checks pause directly, so the revert is the wallet's FactoryPaused
+    /// (vs HiroFactory.Paused for non-self targets, see testExecuteWithOwnerSig_pauseHaltsRelay).
+    function testExecuteWithOwnerSig_selfCall_pausedReverts() public {
+        address strat = address(0x57A7);
+
+        IHiroWallet.Call[] memory calls =
+            _singleCall(address(hiroWallet), abi.encodeWithSelector(hiroWallet.setStrategy.selector, strat, true), 0);
+        uint256 deadline = block.timestamp + 1 hours;
+        bytes memory sig = _sign(ownerPk, _digest(calls, 1, deadline));
+
+        vm.prank(user);
+        hiroFactory.pause();
+
+        vm.prank(relayer);
+        vm.expectRevert(HiroWallet.FactoryPaused.selector);
+        hiroWallet.executeWithOwnerSig(calls, 1, deadline, sig);
+
+        assertFalse(hiroWallet.enabledStrategies(strat));
     }
 }

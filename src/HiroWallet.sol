@@ -23,7 +23,10 @@ contract HiroWallet is IHiroWallet, EIP712, ReentrancyGuard {
     error EmptyCalls();
     error NotAgent();
     error StrategyNotWhitelisted();
+    error StrategyNotEnabled();
+    error NotOwnerOrSelf();
     error FactoryPaused();
+    error SelfCallNotAllowed();
 
     /// @dev EIP-712 struct hash for a single Call.
     bytes32 public constant CALL_TYPEHASH = keccak256("Call(address target,bytes data,uint256 value)");
@@ -39,8 +42,15 @@ contract HiroWallet is IHiroWallet, EIP712, ReentrancyGuard {
     /// @dev Permit2-style bitmap: `nonce >> 8` selects the slot, low 8 bits select the bit.
     mapping(uint256 => uint256) public nonceBitmap;
 
+    /// @dev Per-wallet opt-in. A strategy must be enabled here by the owner *in addition* to
+    /// being on the factory's global strategyWhitelist before `executeStrategy` will run it.
+    /// This is the mass-drain firewall: a compromised factory key can register a malicious
+    /// strategy globally, but it has zero per-wallet opt-ins, so it cannot move any user's funds.
+    mapping(address => bool) public enabledStrategies;
+
     event Executed(address indexed target, uint256 value);
     event NonceInvalidated(uint256 indexed nonce);
+    event StrategyEnabled(address indexed strategy, bool enabled);
     event StrategyExecuted(address indexed strategy, address indexed agent);
 
     modifier onlyOwner() {
@@ -84,23 +94,37 @@ contract HiroWallet is IHiroWallet, EIP712, ReentrancyGuard {
         if (!SignatureChecker.isValidSignatureNow(owner, digest, signature)) revert InvalidSignature();
 
         _consumeNonce(nonce);
-        _execute(calls);
+        _execute(calls, true);
     }
 
     /// @notice Execute a bundle directly as owner. No nonce, no signature.
     function executeAsOwner(Call[] calldata calls) external onlyOwner nonReentrant {
-        _execute(calls);
+        _execute(calls, true);
     }
 
-    /// @notice Execute a whitelisted strategy. Caller must be a whitelisted agent.
+    /// @notice Opt this wallet in (or out) of a strategy. Callable by the owner EOA directly,
+    /// or via an owner-signed bundle through `executeWithOwnerSig`/`executeAsOwner` (the wallet
+    /// self-call) for a gasless opt-in. Required before `executeStrategy` can run the strategy.
+    function setStrategy(address strategy, bool enabled) external {
+        if (msg.sender != owner && msg.sender != address(this)) revert NotOwnerOrSelf();
+        enabledStrategies[strategy] = enabled;
+        emit StrategyEnabled(strategy, enabled);
+    }
+
+    /// @notice Execute a whitelisted strategy. Caller must be a whitelisted agent and the wallet
+    /// owner must have opted the strategy in via `setStrategy`.
     function executeStrategy(IStrategy strategy, bytes calldata params) external nonReentrant {
         IHiroFactory f = IHiroFactory(factory);
         if (f.paused()) revert FactoryPaused();
         if (!f.agentWhitelist(msg.sender)) revert NotAgent();
         if (!f.strategyWhitelist(address(strategy))) revert StrategyNotWhitelisted();
+        if (!enabledStrategies[address(strategy)]) revert StrategyNotEnabled();
 
         Call[] memory calls = strategy.plan(address(this), params);
-        _execute(calls);
+        // allowSelf = false: strategy output may never target the wallet itself. This keeps the
+        // wallet's owner-or-self functions (e.g. setStrategy) reachable only by owner-authorized
+        // bundles, not by a strategy's plan(), so an enabled strategy cannot escalate privileges.
+        _execute(calls, false);
         emit StrategyExecuted(address(strategy), msg.sender);
     }
 
@@ -153,7 +177,10 @@ contract HiroWallet is IHiroWallet, EIP712, ReentrancyGuard {
         return keccak256(abi.encodePacked(hashes));
     }
 
-    function _execute(Call[] memory calls) internal {
+    /// @param allowSelf Whether a call may target the wallet itself. Only owner-authorized
+    /// paths (`executeWithOwnerSig`/`executeAsOwner`) pass `true`; `executeStrategy` passes
+    /// `false` so strategy output can never reach the wallet's owner-or-self functions.
+    function _execute(Call[] memory calls, bool allowSelf) internal {
         uint256 length = calls.length;
         if (length == 0) revert EmptyCalls();
 
@@ -164,12 +191,21 @@ contract HiroWallet is IHiroWallet, EIP712, ReentrancyGuard {
         if (totalEth > address(this).balance) revert InsufficientETH();
 
         for (uint256 i = 0; i < length; i++) {
-            IHiroFactory(factory).validateCall(calls[i].target);
+            address target = calls[i].target;
+            if (target == address(this)) {
+                // A wallet self-call (e.g. a gasless setStrategy opt-in) skips the target
+                // whitelist by design, but is only permitted on owner-authorized paths. Pause is
+                // still enforced first, matching validateCall's ordering.
+                if (!allowSelf) revert SelfCallNotAllowed();
+                if (IHiroFactory(factory).paused()) revert FactoryPaused();
+            } else {
+                IHiroFactory(factory).validateCall(target);
+            }
 
-            (bool success,) = payable(calls[i].target).call{value: calls[i].value}(calls[i].data);
+            (bool success,) = payable(target).call{value: calls[i].value}(calls[i].data);
             if (!success) revert CallFailed();
 
-            emit Executed(calls[i].target, calls[i].value);
+            emit Executed(target, calls[i].value);
         }
     }
 }
