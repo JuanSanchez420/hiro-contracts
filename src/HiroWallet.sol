@@ -2,13 +2,15 @@
 pragma solidity ^0.8.20;
 
 import "./interfaces/IHiroFactory.sol";
+import "./interfaces/IHiroWallet.sol";
+import "./interfaces/IStrategy.sol";
 import "lib/openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
 import "lib/openzeppelin-contracts/contracts/token/ERC20/utils/SafeERC20.sol";
 import "lib/openzeppelin-contracts/contracts/security/ReentrancyGuard.sol";
 import "lib/openzeppelin-contracts/contracts/utils/cryptography/EIP712.sol";
 import "lib/openzeppelin-contracts/contracts/utils/cryptography/SignatureChecker.sol";
 
-contract HiroWallet is EIP712, ReentrancyGuard {
+contract HiroWallet is IHiroWallet, EIP712, ReentrancyGuard {
     using SafeERC20 for IERC20;
 
     error NotOwner();
@@ -19,12 +21,9 @@ contract HiroWallet is EIP712, ReentrancyGuard {
     error InsufficientETH();
     error EthTransferFailed();
     error EmptyCalls();
-
-    struct Call {
-        address target;
-        bytes data;
-        uint256 value;
-    }
+    error NotAgent();
+    error StrategyNotWhitelisted();
+    error FactoryPaused();
 
     /// @dev EIP-712 struct hash for a single Call.
     bytes32 public constant CALL_TYPEHASH = keccak256("Call(address target,bytes data,uint256 value)");
@@ -42,6 +41,7 @@ contract HiroWallet is EIP712, ReentrancyGuard {
 
     event Executed(address indexed target, uint256 value);
     event NonceInvalidated(uint256 indexed nonce);
+    event StrategyExecuted(address indexed strategy, address indexed agent);
 
     modifier onlyOwner() {
         if (msg.sender != owner) revert NotOwner();
@@ -90,6 +90,18 @@ contract HiroWallet is EIP712, ReentrancyGuard {
     /// @notice Execute a bundle directly as owner. No nonce, no signature.
     function executeAsOwner(Call[] calldata calls) external onlyOwner nonReentrant {
         _execute(calls);
+    }
+
+    /// @notice Execute a whitelisted strategy. Caller must be a whitelisted agent.
+    function executeStrategy(IStrategy strategy, bytes calldata params) external nonReentrant {
+        IHiroFactory f = IHiroFactory(factory);
+        if (f.paused()) revert FactoryPaused();
+        if (!f.agentWhitelist(msg.sender)) revert NotAgent();
+        if (!f.strategyWhitelist(address(strategy))) revert StrategyNotWhitelisted();
+
+        Call[] memory calls = strategy.plan(address(this), params);
+        _execute(calls);
+        emit StrategyExecuted(address(strategy), msg.sender);
     }
 
     /// @notice Mark a nonce as used so any signature bound to it can no longer be submitted.
@@ -141,7 +153,7 @@ contract HiroWallet is EIP712, ReentrancyGuard {
         return keccak256(abi.encodePacked(hashes));
     }
 
-    function _execute(Call[] calldata calls) internal {
+    function _execute(Call[] memory calls) internal {
         uint256 length = calls.length;
         if (length == 0) revert EmptyCalls();
 

@@ -4,6 +4,9 @@ pragma solidity ^0.8.20;
 import {Test} from "forge-std/Test.sol";
 import {HiroFactory} from "../src/HiroFactory.sol";
 import {HiroWallet} from "../src/HiroWallet.sol";
+import {IHiroWallet} from "../src/interfaces/IHiroWallet.sol";
+import {IStrategy} from "../src/interfaces/IStrategy.sol";
+import {NoopStrategy} from "./mocks/NoopStrategy.sol";
 
 contract HiroFactoryTest is Test {
     HiroFactory public hiroFactory;
@@ -15,6 +18,10 @@ contract HiroFactoryTest is Test {
     event PausedSet(bool paused);
     event TargetAdded(address indexed target);
     event TargetRemoved(address indexed target);
+    event AgentAdded(address indexed agent);
+    event AgentRemoved(address indexed agent);
+    event StrategyAdded(address indexed strategy);
+    event StrategyRemoved(address indexed strategy);
 
     receive() external payable {}
 
@@ -113,8 +120,8 @@ contract HiroFactoryTest is Test {
         MockTarget mock = new MockTarget();
         hiroFactory.addTarget(address(mock));
 
-        HiroWallet.Call[] memory calls = new HiroWallet.Call[](1);
-        calls[0] = HiroWallet.Call({
+        IHiroWallet.Call[] memory calls = new IHiroWallet.Call[](1);
+        calls[0] = IHiroWallet.Call({
             target: address(mock),
             data: abi.encodeWithSelector(MockTarget.setValue.selector, 42),
             value: 0
@@ -266,6 +273,99 @@ contract HiroFactoryTest is Test {
         vm.startPrank(walletOwner);
         walletAddress = hiroFactory.createHiroWallet{value: value}();
         vm.stopPrank();
+    }
+
+    // ==================== agentWhitelist TESTS ====================
+
+    function testAgentWhitelistManagement() public {
+        address agent = address(0xA1);
+
+        vm.expectEmit(true, false, false, true, address(hiroFactory));
+        emit AgentAdded(agent);
+        hiroFactory.addAgent(agent);
+        assertTrue(hiroFactory.agentWhitelist(agent));
+
+        vm.expectEmit(true, false, false, true, address(hiroFactory));
+        emit AgentRemoved(agent);
+        hiroFactory.removeAgent(agent);
+        assertFalse(hiroFactory.agentWhitelist(agent));
+    }
+
+    function testAddRemoveAgentRejectZeroAddress() public {
+        vm.expectRevert(HiroFactory.InvalidAddress.selector);
+        hiroFactory.addAgent(address(0));
+
+        vm.expectRevert(HiroFactory.InvalidAddress.selector);
+        hiroFactory.removeAgent(address(0));
+    }
+
+    function testNonOwnerCannotManageAgents() public {
+        vm.prank(OTHER_USER);
+        vm.expectRevert("Ownable: caller is not the owner");
+        hiroFactory.addAgent(address(0xA1));
+
+        vm.prank(OTHER_USER);
+        vm.expectRevert("Ownable: caller is not the owner");
+        hiroFactory.removeAgent(address(0xA1));
+    }
+
+    function testAddAgent_idempotentReAdd() public {
+        hiroFactory.addAgent(address(0xA1));
+        hiroFactory.addAgent(address(0xA1));
+        assertTrue(hiroFactory.agentWhitelist(address(0xA1)));
+    }
+
+    function testRemoveAgent_idempotentNoop() public {
+        hiroFactory.removeAgent(address(0xA1));
+        assertFalse(hiroFactory.agentWhitelist(address(0xA1)));
+    }
+
+    // ==================== strategyWhitelist TESTS ====================
+
+    function testStrategyWhitelistManagement() public {
+        address strat = address(new NoopStrategy());
+
+        vm.expectEmit(true, false, false, true, address(hiroFactory));
+        emit StrategyAdded(strat);
+        hiroFactory.addStrategy(strat);
+        assertTrue(hiroFactory.strategyWhitelist(strat));
+
+        vm.expectEmit(true, false, false, true, address(hiroFactory));
+        emit StrategyRemoved(strat);
+        hiroFactory.removeStrategy(strat);
+        assertFalse(hiroFactory.strategyWhitelist(strat));
+    }
+
+    function testAddRemoveStrategyRejectZeroAddress() public {
+        vm.expectRevert(HiroFactory.InvalidAddress.selector);
+        hiroFactory.addStrategy(address(0));
+
+        vm.expectRevert(HiroFactory.InvalidAddress.selector);
+        hiroFactory.removeStrategy(address(0));
+    }
+
+    function testNonOwnerCannotManageStrategies() public {
+        address strat = address(new NoopStrategy());
+        vm.prank(OTHER_USER);
+        vm.expectRevert("Ownable: caller is not the owner");
+        hiroFactory.addStrategy(strat);
+
+        vm.prank(OTHER_USER);
+        vm.expectRevert("Ownable: caller is not the owner");
+        hiroFactory.removeStrategy(strat);
+    }
+
+    function testAddStrategy_idempotentReAdd() public {
+        address strat = address(new NoopStrategy());
+        hiroFactory.addStrategy(strat);
+        hiroFactory.addStrategy(strat);
+        assertTrue(hiroFactory.strategyWhitelist(strat));
+    }
+
+    function testRemoveStrategy_idempotentNoop() public {
+        address strat = address(new NoopStrategy());
+        hiroFactory.removeStrategy(strat);
+        assertFalse(hiroFactory.strategyWhitelist(strat));
     }
 }
 

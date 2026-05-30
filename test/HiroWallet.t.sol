@@ -4,7 +4,10 @@ pragma solidity ^0.8.20;
 import {Test} from "forge-std/Test.sol";
 import {HiroWallet} from "../src/HiroWallet.sol";
 import {HiroFactory} from "../src/HiroFactory.sol";
+import {IHiroWallet} from "../src/interfaces/IHiroWallet.sol";
+import {IStrategy} from "../src/interfaces/IStrategy.sol";
 import {MockERC1271Wallet} from "./mocks/MockERC1271Wallet.sol";
+import {NoopStrategy} from "./mocks/NoopStrategy.sol";
 import "lib/openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
 import "lib/openzeppelin-contracts/contracts/token/ERC721/ERC721.sol";
 import "lib/openzeppelin-contracts/contracts/token/ERC1155/ERC1155.sol";
@@ -122,7 +125,7 @@ contract TestHiroWallet is Test {
     // Helpers
     // ═══════════════════════════════════════════════════════════════════════════
 
-    function _hashCalls(HiroWallet.Call[] memory calls) internal view returns (bytes32) {
+    function _hashCalls(IHiroWallet.Call[] memory calls) internal view returns (bytes32) {
         bytes32 callTypehash = hiroWallet.CALL_TYPEHASH();
         bytes32[] memory hashes = new bytes32[](calls.length);
         for (uint256 i = 0; i < calls.length; i++) {
@@ -131,7 +134,11 @@ contract TestHiroWallet is Test {
         return keccak256(abi.encodePacked(hashes));
     }
 
-    function _digest(HiroWallet.Call[] memory calls, uint256 nonce, uint256 deadline) internal view returns (bytes32) {
+    function _digest(IHiroWallet.Call[] memory calls, uint256 nonce, uint256 deadline)
+        internal
+        view
+        returns (bytes32)
+    {
         bytes32 structHash = keccak256(
             abi.encode(hiroWallet.EXECUTE_TYPEHASH(), address(hiroWallet), user, _hashCalls(calls), nonce, deadline)
         );
@@ -146,10 +153,10 @@ contract TestHiroWallet is Test {
     function _singleCall(address target, bytes memory data, uint256 value)
         internal
         pure
-        returns (HiroWallet.Call[] memory calls)
+        returns (IHiroWallet.Call[] memory calls)
     {
-        calls = new HiroWallet.Call[](1);
-        calls[0] = HiroWallet.Call({target: target, data: data, value: value});
+        calls = new IHiroWallet.Call[](1);
+        calls[0] = IHiroWallet.Call({target: target, data: data, value: value});
     }
 
     function _addTarget(address target) internal {
@@ -165,7 +172,7 @@ contract TestHiroWallet is Test {
         MockContract mock = new MockContract();
         _addTarget(address(mock));
 
-        HiroWallet.Call[] memory calls =
+        IHiroWallet.Call[] memory calls =
             _singleCall(address(mock), abi.encodeWithSelector(MockContract.setValue.selector, 42), 0.25 ether);
 
         uint256 nonce = 1;
@@ -188,13 +195,13 @@ contract TestHiroWallet is Test {
         _addTarget(address(mock1));
         _addTarget(address(mock2));
 
-        HiroWallet.Call[] memory calls = new HiroWallet.Call[](2);
-        calls[0] = HiroWallet.Call({
+        IHiroWallet.Call[] memory calls = new IHiroWallet.Call[](2);
+        calls[0] = IHiroWallet.Call({
             target: address(mock1),
             data: abi.encodeWithSelector(MockContract.setValue.selector, 10),
             value: 0.1 ether
         });
-        calls[1] = HiroWallet.Call({
+        calls[1] = IHiroWallet.Call({
             target: address(mock2),
             data: abi.encodeWithSelector(MockContract.setValue.selector, 20),
             value: 0.2 ether
@@ -218,7 +225,7 @@ contract TestHiroWallet is Test {
         MockContract mock = new MockContract();
         _addTarget(address(mock));
 
-        HiroWallet.Call[] memory calls = _singleCall(address(mock), "", 0);
+        IHiroWallet.Call[] memory calls = _singleCall(address(mock), "", 0);
         uint256 deadline = block.timestamp + 1 hours;
         bytes memory sig = _sign(uint256(0xBADBADBAD), _digest(calls, 1, deadline));
 
@@ -232,7 +239,7 @@ contract TestHiroWallet is Test {
         _addTarget(address(mock));
         _addTarget(address(other));
 
-        HiroWallet.Call[] memory calls = _singleCall(address(mock), "", 0);
+        IHiroWallet.Call[] memory calls = _singleCall(address(mock), "", 0);
         uint256 deadline = block.timestamp + 1 hours;
         bytes memory sig = _sign(ownerPk, _digest(calls, 1, deadline));
 
@@ -245,7 +252,7 @@ contract TestHiroWallet is Test {
         MockContract mock = new MockContract();
         _addTarget(address(mock));
 
-        HiroWallet.Call[] memory calls =
+        IHiroWallet.Call[] memory calls =
             _singleCall(address(mock), abi.encodeWithSelector(MockContract.setValue.selector, 1), 0);
         uint256 deadline = block.timestamp + 1 hours;
         bytes memory sig = _sign(ownerPk, _digest(calls, 1, deadline));
@@ -259,7 +266,7 @@ contract TestHiroWallet is Test {
         MockContract mock = new MockContract();
         _addTarget(address(mock));
 
-        HiroWallet.Call[] memory calls = _singleCall(address(mock), "", 0.1 ether);
+        IHiroWallet.Call[] memory calls = _singleCall(address(mock), "", 0.1 ether);
         uint256 deadline = block.timestamp + 1 hours;
         bytes memory sig = _sign(ownerPk, _digest(calls, 1, deadline));
 
@@ -272,7 +279,7 @@ contract TestHiroWallet is Test {
         MockContract mock = new MockContract();
         _addTarget(address(mock));
 
-        HiroWallet.Call[] memory calls = _singleCall(address(mock), "", 0);
+        IHiroWallet.Call[] memory calls = _singleCall(address(mock), "", 0);
         uint256 deadline = block.timestamp + 1 hours;
         bytes memory sig = _sign(ownerPk, _digest(calls, 1, deadline));
 
@@ -284,7 +291,7 @@ contract TestHiroWallet is Test {
         MockContract mock = new MockContract();
         _addTarget(address(mock));
 
-        HiroWallet.Call[] memory calls = _singleCall(address(mock), "", 0);
+        IHiroWallet.Call[] memory calls = _singleCall(address(mock), "", 0);
         uint256 originalDeadline = block.timestamp + 1 hours;
         bytes memory sig = _sign(ownerPk, _digest(calls, 1, originalDeadline));
 
@@ -302,7 +309,7 @@ contract TestHiroWallet is Test {
         MockContract mock = new MockContract();
         _addTarget(address(mock));
 
-        HiroWallet.Call[] memory calls = _singleCall(address(mock), "", 0);
+        IHiroWallet.Call[] memory calls = _singleCall(address(mock), "", 0);
         uint256 deadline = block.timestamp + 1 hours;
         // Sign a digest bound to `hiroWallet` then try to redeem at `other`.
         bytes memory sig = _sign(ownerPk, _digest(calls, 1, deadline));
@@ -315,7 +322,7 @@ contract TestHiroWallet is Test {
         MockContract mock = new MockContract();
         _addTarget(address(mock));
 
-        HiroWallet.Call[] memory calls = _singleCall(address(mock), "", 0);
+        IHiroWallet.Call[] memory calls = _singleCall(address(mock), "", 0);
         uint256 deadline = block.timestamp + 1 hours;
         bytes memory sig = _sign(ownerPk, _digest(calls, 1, deadline));
 
@@ -328,7 +335,7 @@ contract TestHiroWallet is Test {
         MockContract mock = new MockContract();
         _addTarget(address(mock));
 
-        HiroWallet.Call[] memory calls = _singleCall(address(mock), "", 0);
+        IHiroWallet.Call[] memory calls = _singleCall(address(mock), "", 0);
         uint256 deadline = block.timestamp + 1 hours;
         bytes memory sig = _sign(ownerPk, _digest(calls, 1, deadline));
 
@@ -342,7 +349,7 @@ contract TestHiroWallet is Test {
         MockContract mock = new MockContract();
         _addTarget(address(mock));
 
-        HiroWallet.Call[] memory calls = _singleCall(address(mock), "", 0);
+        IHiroWallet.Call[] memory calls = _singleCall(address(mock), "", 0);
         uint256 deadline = block.timestamp - 1;
         bytes memory sig = _sign(ownerPk, _digest(calls, 1, deadline));
 
@@ -356,7 +363,7 @@ contract TestHiroWallet is Test {
         MockContract mock = new MockContract();
         _addTarget(address(mock));
 
-        HiroWallet.Call[] memory calls = _singleCall(address(mock), "", 0);
+        IHiroWallet.Call[] memory calls = _singleCall(address(mock), "", 0);
         uint256 deadline = block.timestamp + 1 hours;
         bytes32 digest = _digest(calls, 1, deadline);
 
@@ -378,7 +385,7 @@ contract TestHiroWallet is Test {
         MockContract mock = new MockContract();
         _addTarget(address(mock));
 
-        HiroWallet.Call[] memory calls =
+        IHiroWallet.Call[] memory calls =
             _singleCall(address(mock), abi.encodeWithSelector(MockContract.setValue.selector, 42), 0.25 ether);
 
         vm.prank(user);
@@ -389,7 +396,7 @@ contract TestHiroWallet is Test {
     }
 
     function testExecuteAsOwner_nonOwner_reverts() public {
-        HiroWallet.Call[] memory calls = _singleCall(address(0xDEAD), "", 0);
+        IHiroWallet.Call[] memory calls = _singleCall(address(0xDEAD), "", 0);
 
         vm.prank(nonOwner);
         vm.expectRevert(HiroWallet.NotOwner.selector);
@@ -400,7 +407,7 @@ contract TestHiroWallet is Test {
         MockContract mock = new MockContract();
         _addTarget(address(mock));
 
-        HiroWallet.Call[] memory calls = _singleCall(address(mock), "", 0);
+        IHiroWallet.Call[] memory calls = _singleCall(address(mock), "", 0);
 
         // executeAsOwner uses no nonce; the bitmap remains empty.
         vm.prank(user);
@@ -423,7 +430,7 @@ contract TestHiroWallet is Test {
         // A subsequent signature bound to nonce 42 must now be unredeemable.
         MockContract mock = new MockContract();
         _addTarget(address(mock));
-        HiroWallet.Call[] memory calls = _singleCall(address(mock), "", 0);
+        IHiroWallet.Call[] memory calls = _singleCall(address(mock), "", 0);
         uint256 deadline = block.timestamp + 1 hours;
         bytes memory sig = _sign(ownerPk, _digest(calls, 42, deadline));
 
@@ -455,7 +462,7 @@ contract TestHiroWallet is Test {
         vm.prank(user);
         hiroFactory.pause();
 
-        HiroWallet.Call[] memory calls = _singleCall(address(mock), "", 0);
+        IHiroWallet.Call[] memory calls = _singleCall(address(mock), "", 0);
         uint256 deadline = block.timestamp + 1 hours;
         bytes memory sig = _sign(ownerPk, _digest(calls, 1, deadline));
 
@@ -473,7 +480,7 @@ contract TestHiroWallet is Test {
         vm.prank(user);
         hiroFactory.pause();
 
-        HiroWallet.Call[] memory calls = _singleCall(address(mock), "", 0);
+        IHiroWallet.Call[] memory calls = _singleCall(address(mock), "", 0);
         uint256 deadline = block.timestamp + 1 hours;
         bytes memory sig = _sign(ownerPk, _digest(calls, 1, deadline));
 
@@ -491,7 +498,7 @@ contract TestHiroWallet is Test {
     function testExecuteWithOwnerSig_nonWhitelistedTarget_reverts() public {
         MockContract mock = new MockContract(); // not added to whitelist
 
-        HiroWallet.Call[] memory calls = _singleCall(address(mock), "", 0);
+        IHiroWallet.Call[] memory calls = _singleCall(address(mock), "", 0);
         uint256 deadline = block.timestamp + 1 hours;
         bytes memory sig = _sign(ownerPk, _digest(calls, 1, deadline));
 
@@ -504,7 +511,7 @@ contract TestHiroWallet is Test {
         // dispatch through. Use a non-empty calldata so this actually exercises the dispatcher,
         // not just the factory's receive().
         assertFalse(hiroFactory.targetWhitelist(address(hiroFactory)));
-        HiroWallet.Call[] memory calls = _singleCall(
+        IHiroWallet.Call[] memory calls = _singleCall(
             address(hiroFactory), abi.encodeWithSelector(hiroFactory.targetWhitelist.selector, address(0x1234)), 0
         );
         uint256 deadline = block.timestamp + 1 hours;
@@ -518,7 +525,7 @@ contract TestHiroWallet is Test {
         MockContract mock = new MockContract();
         _addTarget(address(mock));
 
-        HiroWallet.Call[] memory calls = _singleCall(address(mock), "", 100 ether);
+        IHiroWallet.Call[] memory calls = _singleCall(address(mock), "", 100 ether);
         uint256 deadline = block.timestamp + 1 hours;
         bytes memory sig = _sign(ownerPk, _digest(calls, 1, deadline));
 
@@ -533,13 +540,13 @@ contract TestHiroWallet is Test {
         _addTarget(address(mock2));
         mock2.setRevert(true);
 
-        HiroWallet.Call[] memory calls = new HiroWallet.Call[](2);
-        calls[0] = HiroWallet.Call({
+        IHiroWallet.Call[] memory calls = new IHiroWallet.Call[](2);
+        calls[0] = IHiroWallet.Call({
             target: address(mock1),
             data: abi.encodeWithSelector(MockContract.setValue.selector, 10),
             value: 0
         });
-        calls[1] = HiroWallet.Call({
+        calls[1] = IHiroWallet.Call({
             target: address(mock2),
             data: abi.encodeWithSelector(MockContract.setValue.selector, 20),
             value: 0
@@ -558,7 +565,7 @@ contract TestHiroWallet is Test {
     }
 
     function testExecuteWithOwnerSig_emptyCalls_reverts() public {
-        HiroWallet.Call[] memory calls = new HiroWallet.Call[](0);
+        IHiroWallet.Call[] memory calls = new IHiroWallet.Call[](0);
         uint256 deadline = block.timestamp + 1 hours;
         bytes memory sig = _sign(ownerPk, _digest(calls, 1, deadline));
 
@@ -582,7 +589,7 @@ contract TestHiroWallet is Test {
         MockContract mock = new MockContract();
         _addTarget(address(mock));
 
-        HiroWallet.Call[] memory calls =
+        IHiroWallet.Call[] memory calls =
             _singleCall(address(mock), abi.encodeWithSelector(MockContract.setValue.selector, 7), 0);
         uint256 deadline = block.timestamp + 1 hours;
 
@@ -607,7 +614,7 @@ contract TestHiroWallet is Test {
         MockContract mock = new MockContract();
         _addTarget(address(mock));
 
-        HiroWallet.Call[] memory calls = _singleCall(address(mock), "", 0);
+        IHiroWallet.Call[] memory calls = _singleCall(address(mock), "", 0);
         uint256 deadline = block.timestamp + 1 hours;
         bytes memory sig = hex"deadbeef"; // never registered as valid
 
@@ -766,7 +773,7 @@ contract TestHiroWallet is Test {
         uint256 feeAmount = 0.1 ether;
         uint256 ownerBalanceBefore = user.balance;
 
-        HiroWallet.Call[] memory calls = _singleCall(address(hiroFactory), "", feeAmount);
+        IHiroWallet.Call[] memory calls = _singleCall(address(hiroFactory), "", feeAmount);
         vm.prank(user);
         hiroWallet.executeAsOwner(calls);
 
@@ -776,5 +783,160 @@ contract TestHiroWallet is Test {
         hiroFactory.sweepETH();
 
         assertEq(user.balance, ownerBalanceBefore + feeAmount);
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // executeStrategy
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    event StrategyExecuted(address indexed strategy, address indexed agent);
+
+    function _addAgent(address a) internal {
+        vm.prank(user);
+        hiroFactory.addAgent(a);
+    }
+
+    function _addStrategy(address s) internal {
+        vm.prank(user);
+        hiroFactory.addStrategy(s);
+    }
+
+    function _encodeNoopCall(address target, bytes memory data, uint256 value) internal pure returns (bytes memory) {
+        return abi.encode(target, data, value);
+    }
+
+    function testExecuteStrategy_happyPath_singleCall() public {
+        MockContract mock = new MockContract();
+        _addTarget(address(mock));
+        NoopStrategy strat = new NoopStrategy();
+        _addStrategy(address(strat));
+        _addAgent(relayer);
+
+        bytes memory params =
+            _encodeNoopCall(address(mock), abi.encodeWithSelector(MockContract.setValue.selector, 7), 0);
+
+        vm.expectEmit(true, true, false, false, address(hiroWallet));
+        emit StrategyExecuted(address(strat), relayer);
+
+        vm.prank(relayer);
+        hiroWallet.executeStrategy(strat, params);
+
+        assertEq(mock.value(), 7);
+    }
+
+    function testExecuteStrategy_happyPath_withValue() public {
+        MockContract mock = new MockContract();
+        _addTarget(address(mock));
+        NoopStrategy strat = new NoopStrategy();
+        _addStrategy(address(strat));
+        _addAgent(relayer);
+
+        bytes memory params = _encodeNoopCall(address(mock), "", 0.1 ether);
+
+        vm.prank(relayer);
+        hiroWallet.executeStrategy(strat, params);
+
+        assertEq(mock.lastReceivedValue(), 0.1 ether);
+    }
+
+    function testExecuteStrategy_nonAgentCaller_reverts() public {
+        NoopStrategy strat = new NoopStrategy();
+        _addStrategy(address(strat));
+
+        vm.prank(relayer);
+        vm.expectRevert(HiroWallet.NotAgent.selector);
+        hiroWallet.executeStrategy(strat, "");
+    }
+
+    function testExecuteStrategy_nonWhitelistedStrategy_reverts() public {
+        NoopStrategy strat = new NoopStrategy();
+        _addAgent(relayer);
+
+        vm.prank(relayer);
+        vm.expectRevert(HiroWallet.StrategyNotWhitelisted.selector);
+        hiroWallet.executeStrategy(strat, "");
+    }
+
+    function testExecuteStrategy_pausedFactory_reverts() public {
+        NoopStrategy strat = new NoopStrategy();
+        _addStrategy(address(strat));
+        _addAgent(relayer);
+        vm.prank(user);
+        hiroFactory.pause();
+
+        vm.prank(relayer);
+        vm.expectRevert(HiroWallet.FactoryPaused.selector);
+        hiroWallet.executeStrategy(strat, "");
+    }
+
+    function testExecuteStrategy_strategyReturnsNonWhitelistedTarget_reverts() public {
+        MockContract mock = new MockContract();
+        // mock NOT whitelisted
+        NoopStrategy strat = new NoopStrategy();
+        _addStrategy(address(strat));
+        _addAgent(relayer);
+
+        bytes memory params =
+            _encodeNoopCall(address(mock), abi.encodeWithSelector(MockContract.setValue.selector, 7), 0);
+
+        vm.prank(relayer);
+        vm.expectRevert(HiroFactory.TargetNotWhitelisted.selector);
+        hiroWallet.executeStrategy(strat, params);
+    }
+
+    function testExecuteStrategy_emptyCallsFromPlan_reverts() public {
+        NoopStrategy strat = new NoopStrategy();
+        _addStrategy(address(strat));
+        _addAgent(relayer);
+
+        vm.prank(relayer);
+        vm.expectRevert(HiroWallet.EmptyCalls.selector);
+        hiroWallet.executeStrategy(strat, "");
+    }
+
+    function testExecuteStrategy_insufficientETH_reverts() public {
+        MockContract mock = new MockContract();
+        _addTarget(address(mock));
+        NoopStrategy strat = new NoopStrategy();
+        _addStrategy(address(strat));
+        _addAgent(relayer);
+
+        bytes memory params = _encodeNoopCall(address(mock), "", 100 ether);
+
+        vm.prank(relayer);
+        vm.expectRevert(HiroWallet.InsufficientETH.selector);
+        hiroWallet.executeStrategy(strat, params);
+    }
+
+    function testExecuteStrategy_calleeReverts_propagates() public {
+        MockContract mock = new MockContract();
+        _addTarget(address(mock));
+        mock.setRevert(true);
+        NoopStrategy strat = new NoopStrategy();
+        _addStrategy(address(strat));
+        _addAgent(relayer);
+
+        bytes memory params =
+            _encodeNoopCall(address(mock), abi.encodeWithSelector(MockContract.setValue.selector, 7), 0);
+
+        vm.prank(relayer);
+        vm.expectRevert(HiroWallet.CallFailed.selector);
+        hiroWallet.executeStrategy(strat, params);
+    }
+
+    function testExecuteStrategy_doesNotConsumeNonce() public {
+        MockContract mock = new MockContract();
+        _addTarget(address(mock));
+        NoopStrategy strat = new NoopStrategy();
+        _addStrategy(address(strat));
+        _addAgent(relayer);
+
+        bytes memory params =
+            _encodeNoopCall(address(mock), abi.encodeWithSelector(MockContract.setValue.selector, 7), 0);
+
+        vm.prank(relayer);
+        hiroWallet.executeStrategy(strat, params);
+
+        assertFalse(hiroWallet.isNonceUsed(1));
     }
 }

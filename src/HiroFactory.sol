@@ -20,11 +20,17 @@ contract HiroFactory is Ownable, IHiroFactory {
     event HiroCreated(address indexed owner, address indexed wallet);
     event TargetAdded(address indexed target);
     event TargetRemoved(address indexed target);
+    event AgentAdded(address indexed agent);
+    event AgentRemoved(address indexed agent);
+    event StrategyAdded(address indexed strategy);
+    event StrategyRemoved(address indexed strategy);
     event PausedSet(bool paused);
 
     mapping(address => address) public override ownerToWallet;
     mapping(address => bool) public override targetWhitelist;
     bool public override paused;
+    mapping(address => bool) public override agentWhitelist;
+    mapping(address => bool) public override strategyWhitelist;
 
     constructor(address[] memory _initialTargets) {
         for (uint256 i = 0; i < _initialTargets.length; i++) {
@@ -96,5 +102,33 @@ contract HiroFactory is Ownable, IHiroFactory {
         if (!targetWhitelist[target]) return;
         targetWhitelist[target] = false;
         emit TargetRemoved(target);
+    }
+
+    function addAgent(address agent) external override onlyOwner {
+        if (agent == address(0)) revert InvalidAddress();
+        if (agentWhitelist[agent]) return;
+        agentWhitelist[agent] = true;
+        emit AgentAdded(agent);
+    }
+
+    function removeAgent(address agent) external override onlyOwner {
+        if (agent == address(0)) revert InvalidAddress();
+        if (!agentWhitelist[agent]) return;
+        agentWhitelist[agent] = false;
+        emit AgentRemoved(agent);
+    }
+
+    function addStrategy(address strategy) external override onlyOwner {
+        if (strategy == address(0)) revert InvalidAddress();
+        if (strategyWhitelist[strategy]) return;
+        strategyWhitelist[strategy] = true;
+        emit StrategyAdded(strategy);
+    }
+
+    function removeStrategy(address strategy) external override onlyOwner {
+        if (strategy == address(0)) revert InvalidAddress();
+        if (!strategyWhitelist[strategy]) return;
+        strategyWhitelist[strategy] = false;
+        emit StrategyRemoved(strategy);
     }
 }

@@ -18,4 +18,12 @@ interface IHiroFactory {
     function unpause() external;
     function addTarget(address target) external;
     function removeTarget(address target) external;
+
+    function agentWhitelist(address) external view returns (bool);
+    function strategyWhitelist(address) external view returns (bool);
+
+    function addAgent(address agent) external;
+    function removeAgent(address agent) external;
+    function addStrategy(address strategy) external;
+    function removeStrategy(address strategy) external;
 }
