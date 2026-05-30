@@ -1,12 +1,12 @@
 # CLAUDE.md
 
-Foundry-based Solidity project using **Solidity 0.7.6** on Base L2.
+Foundry-based Solidity project using **Solidity 0.8.20** (OpenZeppelin v4.9.6) on Base L2.
 
 ## Commands
 
 ```bash
 forge build                          # Compile
-forge test                           # Run all tests (88 tests)
+forge test                           # Run all tests
 forge test --match-test testName     # Run specific test
 forge test -vvv                      # Verbose output
 forge fmt                            # Format code
@@ -15,9 +15,31 @@ forge fmt                            # Format code
 ## Contracts
 
 ### HiroFactory + HiroWallet (Core)
-Smart wallet system where AI agents execute DeFi transactions safely:
-- **HiroFactory**: Deploys one HiroWallet per user, manages whitelist and agents
-- **HiroWallet**: Owner withdraws funds, agents execute batched calls to whitelisted addresses only
+Smart wallet system. Authority lives in the wallet **owner's signature**, not in
+off-chain agent keys — a compromised key cannot drain wallets en masse.
+
+- **HiroFactory**: Deploys one HiroWallet per user (CREATE2). Holds the mutable
+  `targetWhitelist` of callable protocols, a global `paused` kill switch, and
+  `validateCall(target)` that every wallet call routes through. Owner-gated
+  (intended multisig); no timelock.
+- **HiroWallet**: Owner withdraws funds. Execution is owner-authorized:
+  - `executeWithOwnerSig(calls, nonce, deadline, sig)` — anyone may relay a bundle
+    the owner signed via EIP-712 (OZ `SignatureChecker`, EOA + ERC-1271);
+    Permit2-style bitmap nonces; `invalidateNonce` cancels.
+  - `executeAsOwner(calls)` — owner submits directly from their EOA (liveness
+    fallback when relayers are down).
+  - Every call still passes `factory.validateCall` (pause + target whitelist).
+
+The old global `agents` mapping and `execute(targets,data,eth)` surface are
+**gone**. This intentionally breaks the API/frontend until they migrate to the
+signed-bundle flow — remaining phases are tracked in `TX_SECURITY_ROADMAP.md`.
+
+**Strategy module system (in progress):** to restore *bounded* autonomy for
+agents (e.g. Uniswap V3 LP rebalancing whose params depend on live state), the
+factory gains `agentWhitelist`/`strategyWhitelist` and the wallet a generic
+`executeStrategy(strategy, params)` entry. A whitelisted agent triggers a
+whitelisted strategy whose `plan()` (a view fn) returns the `Call[]`; every call
+still passes `factory.validateCall`. See `EXTENSIBLE.md`.
 
 ### HiroSeason + HiroToken (Seasonal)
 30-day token seasons with guaranteed redemption:
@@ -28,9 +50,21 @@ Smart wallet system where AI agents execute DeFi transactions safely:
 
 Non-ruggable: Owner cannot extract ETH, HIRO, or LP NFT.
 
+## Toolchain notes
+
+- Solidity **0.8.20**, OpenZeppelin **v4.9.6**. Native overflow checks; no SafeMath.
+- `src/libraries/TickMath.sol` is **vendored** (Uniswap V3's library is 0.7.x).
+  Only `getSqrtRatioAtTick` needed an `unchecked` block (overflow-by-design).
+  Parity with the original 0.7.6 output is locked by golden values in
+  `test/fixtures/tickmath_golden.csv` (`test/TickMath.t.sol`) — if you touch
+  TickMath or the compiler version, keep that test green.
+
 ## Deployment
 
-Requires `whitelist.json` and env vars: `AGENT_ADDRESS_1` through `AGENT_ADDRESS_5`.
+The factory v2 constructor takes a single `address[] initialTargets` (the initial
+`targetWhitelist`), sourced from `whitelist.json`. The old `AGENT_ADDRESS_1..5`
+env vars are gone — agents and strategies are registered post-deploy by the owner
+via `addAgent` / `addStrategy`.
 
 ### Local Development
 
